@@ -4,8 +4,11 @@ import android.Manifest
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -23,14 +26,19 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import au.josh.unifiphone.core.SipForegroundService
+import au.josh.unifiphone.data.ThemeMode
 import au.josh.unifiphone.kiosk.KioskManager
 import au.josh.unifiphone.ui.screens.CallScreen
 import au.josh.unifiphone.ui.screens.ContactsScreen
@@ -40,7 +48,6 @@ import au.josh.unifiphone.ui.screens.SettingsScreen
 import au.josh.unifiphone.ui.theme.UniFiPhoneTheme
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import androidx.lifecycle.lifecycleScope
 
 class MainActivity : ComponentActivity() {
 
@@ -49,6 +56,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
 
         val wanted = buildList {
             add(Manifest.permission.RECORD_AUDIO)
@@ -69,6 +77,29 @@ class MainActivity : ComponentActivity() {
         setContent {
             val vm: PhoneViewModel = viewModel()
             val settings by vm.settings.collectAsState()
+
+            val dark = when (settings.themeMode) {
+                ThemeMode.DARK -> true
+                ThemeMode.LIGHT -> false
+                ThemeMode.SYSTEM -> isSystemInDarkTheme()
+            }
+
+            // Keep the system status/navigation bars in step with the theme.
+            LaunchedEffect(dark) {
+                val transparent = Color.Transparent.toArgb()
+                if (dark) {
+                    enableEdgeToEdge(
+                        statusBarStyle = SystemBarStyle.dark(transparent),
+                        navigationBarStyle = SystemBarStyle.dark(transparent),
+                    )
+                } else {
+                    enableEdgeToEdge(
+                        statusBarStyle = SystemBarStyle.light(transparent, transparent),
+                        navigationBarStyle = SystemBarStyle.light(transparent, transparent),
+                    )
+                }
+            }
+
             UniFiPhoneTheme(mode = settings.themeMode) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     Root(vm)

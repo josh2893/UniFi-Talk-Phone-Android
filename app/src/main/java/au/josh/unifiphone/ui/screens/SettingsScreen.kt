@@ -23,13 +23,13 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -55,7 +55,10 @@ fun SettingsScreen(vm: PhoneViewModel) {
     var port by remember(settings.sipPort) { mutableStateOf(settings.sipPort) }
     var user by remember(settings.sipUsername) { mutableStateOf(settings.sipUsername) }
     var pass by remember(settings.sipPassword) { mutableStateOf(settings.sipPassword) }
-    var label by remember(settings.phoneLabel) { mutableStateOf(settings.phoneLabel) }
+
+    // Label is edited locally and committed on focus-loss so it survives
+    // independently of the SIP "Save & register" button.
+    var label by remember { mutableStateOf(settings.phoneLabel) }
 
     val ringtonePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -77,11 +80,22 @@ fun SettingsScreen(vm: PhoneViewModel) {
     ) {
         SectionCard("Identity") {
             OutlinedTextField(
-                value = label, onValueChange = { label = it },
+                value = label,
+                onValueChange = { label = it },
                 label = { Text("Phone label") },
                 supportingText = { Text("Shown on the home screen, e.g. \"Warehouse — Front Desk\"") },
-                singleLine = true, modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { focus ->
+                        if (!focus.isFocused && label.trim() != settings.phoneLabel) {
+                            vm.updateSettings { it.copy(phoneLabel = label.trim()) }
+                        }
+                    },
             )
+            TextButton(onClick = {
+                vm.updateSettings { it.copy(phoneLabel = label.trim()) }
+            }) { Text("Save label") }
         }
 
         SectionCard("SIP account (UniFi Talk)") {

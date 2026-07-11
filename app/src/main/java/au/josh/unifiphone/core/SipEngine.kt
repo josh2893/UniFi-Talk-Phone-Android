@@ -1,6 +1,8 @@
 package au.josh.unifiphone.core
 
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.MediaPlayer
 import au.josh.unifiphone.data.AppSettings
 import au.josh.unifiphone.data.CallRecord
 import au.josh.unifiphone.data.DirectoryRepository
@@ -49,6 +51,10 @@ class SipEngine(
     private var account: Account? = null
     private var currentSettings: AppSettings? = null
 
+    // We drive the incoming ringtone ourselves — the Linphone core ringer is
+    // unreliable on Android (audio-focus dependent, often silent).
+    private var ringPlayer: MediaPlayer? = null
+
     private val _regState = MutableStateFlow(RegState.NONE)
     val regState: StateFlow<RegState> = _regState
 
@@ -68,15 +74,16 @@ class SipEngine(
         core.isPushNotificationEnabled = false
         core.isVideoCaptureEnabled = false
         core.isVideoDisplayEnabled = false
+        core.isNativeRingingEnabled = false
+        core.ring = null            // we handle ringing ourselves
         core.maxCalls = 2
         core.addListener(listener)
         core.start()
     }
 
-    /** (Re)apply SIP account + ringtone from settings. Safe to call repeatedly. */
+    /** (Re)apply SIP account from settings. Safe to call repeatedly. */
     fun applySettings(s: AppSettings) {
         currentSettings = s
-        applyRingtone(s.ringtone)
 
         // Tear down any existing account first
         account?.let { existing ->
@@ -117,27 +124,51 @@ class SipEngine(
         account = acc
     }
 
-    private fun applyRingtone(spec: String) {
-        val path: String? = when {
-            spec.startsWith("raw:") -> {
-                val name = spec.removePrefix("raw:")
-                val resId = context.resources.getIdentifier(name, "raw", context.packageName)
-                if (resId == 0) null else {
-                    val out = File(context.filesDir, "$name.wav")
-                    if (!out.exists()) {
-                        context.resources.openRawResource(resId).use { input ->
-                            out.outputStream().use { input.copyTo(it) }
-                        }
+    /** Resolve the configured ringtone spec to a playable file path. */
+    private fun resolveRingtonePath(spec: String): String? = when {
+        spec.startsWith("raw:") -> {
+            val name = spec.removePrefix("raw:")
+            val resId = context.resources.getIdentifier(name, "raw", context.packageName)
+            if (resId == 0) null else {
+                val out = File(context.filesDir, "$name.wav")
+                if (!out.exists()) {
+                    context.resources.openRawResource(resId).use { input ->
+                        out.outputStream().use { input.copyTo(it) }
                     }
-                    out.absolutePath
                 }
+                out.absolutePath
             }
-            spec.startsWith("file:") -> spec.removePrefix("file:")
-                .takeIf { File(it).exists() }
-            else -> null
         }
-        core.ring = path        // Linphone plays this while an incoming call rings
-        core.isNativeRingingEnabled = false
+        spec.startsWith("file:") -> spec.removePrefix("file:").takeIf { File(it).exists() }
+        else -> null
+    }
+
+    private fun startRinging() {
+        stopRinging()
+        val spec = currentSettings?.ringtone ?: "raw:ringtone_classic"
+        val path = resolveRingtonePath(spec) ?: return
+        runCatching {
+            ringPlayer = MediaPlayer().apply {
+                setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                setDataSource(path)
+                isLooping = true
+                prepare()
+                start()
+            }
+        }
+    }
+
+    private fun stopRinging() {
+        ringPlayer?.runCatching {
+            if (isPlaying) stop()
+            release()
+        }
+        ringPlayer = null
     }
 
     // ---- Call control -------------------------------------------------
@@ -205,6 +236,7 @@ class SipEngine(
                 Call.State.IncomingReceived, Call.State.IncomingEarlyMedia -> {
                     callWasIncoming = true
                     callAnsweredAt = 0L
+                    startRinging()
                     _callState.value = CallUiState(
                         active = true, incoming = true,
                         remoteNumber = remote,
@@ -222,6 +254,7 @@ class SipEngine(
                     )
                 }
                 Call.State.Connected, Call.State.StreamsRunning -> {
+                    stopRinging()
                     if (callAnsweredAt == 0L) callAnsweredAt = System.currentTimeMillis()
                     _callState.value = _callState.value.copy(
                         incoming = false, connected = true, onHold = false,
@@ -233,6 +266,7 @@ class SipEngine(
                     _callState.value = _callState.value.copy(onHold = true)
                 }
                 Call.State.End, Call.State.Error, Call.State.Released -> {
+                    stopRinging()
                     if (_callState.value.active) recordHistory(call, remote)
                     _callState.value = CallUiState()
                     core.isMicEnabled = true
