@@ -2,6 +2,7 @@ package au.josh.unifiphone.core
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.MediaPlayer
 import au.josh.unifiphone.data.AppSettings
 import au.josh.unifiphone.data.CallRecord
@@ -33,7 +34,6 @@ data class CallUiState(
     val incoming: Boolean = false,
     val remoteNumber: String = "",
     val remoteName: String? = null,
-    val groupName: String? = null,
     val connected: Boolean = false,
     val muted: Boolean = false,
     val speaker: Boolean = false,
@@ -41,10 +41,6 @@ data class CallUiState(
     val startedAtMs: Long = 0L,
 )
 
-/**
- * Thin wrapper around the Linphone Core. One instance for the app's lifetime,
- * owned by [au.josh.unifiphone.App] and kept alive by [SipForegroundService].
- */
 class SipEngine(
     private val context: Context,
     private val directory: DirectoryRepository,
@@ -55,9 +51,10 @@ class SipEngine(
     private var account: Account? = null
     private var currentSettings: AppSettings? = null
 
-    // We drive the incoming ringtone ourselves — the Linphone core ringer is
-    // unreliable on Android (audio-focus dependent, often silent).
     private var ringPlayer: MediaPlayer? = null
+    private val audioManager get() =
+        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var savedAlarmVolume: Int? = null
 
     private val _regState = MutableStateFlow(RegState.NONE)
     val regState: StateFlow<RegState> = _regState
@@ -79,17 +76,15 @@ class SipEngine(
         core.isVideoCaptureEnabled = false
         core.isVideoDisplayEnabled = false
         core.isNativeRingingEnabled = false
-        core.ring = null            // we handle ringing ourselves
+        core.ring = null
         core.maxCalls = 2
         core.addListener(listener)
         core.start()
     }
 
-    /** (Re)apply SIP account from settings. Safe to call repeatedly. */
     fun applySettings(s: AppSettings) {
         currentSettings = s
 
-        // Tear down any existing account first
         account?.let { existing ->
             core.removeAccount(existing)
             core.clearAllAuthInfo()
@@ -128,7 +123,6 @@ class SipEngine(
         account = acc
     }
 
-    /** Resolve the configured ringtone spec to a playable file path. */
     private fun resolveRingtonePath(spec: String): String? = when {
         spec.startsWith("raw:") -> {
             val name = spec.removePrefix("raw:")
@@ -152,15 +146,22 @@ class SipEngine(
         val spec = currentSettings?.ringtone ?: "raw:ringtone_classic"
         val path = resolveRingtonePath(spec) ?: return
         runCatching {
+            // Force the alarm stream to max for the duration of ringing —
+            // alarm is the loudest path and rings through silent/DND.
+            val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+            savedAlarmVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxVol, 0)
+
             ringPlayer = MediaPlayer().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                        .setUsage(AudioAttributes.USAGE_ALARM)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build()
                 )
                 setDataSource(path)
                 isLooping = true
+                setVolume(1f, 1f)
                 prepare()
                 start()
             }
@@ -173,6 +174,11 @@ class SipEngine(
             release()
         }
         ringPlayer = null
+        // Restore the user's alarm volume
+        savedAlarmVolume?.let {
+            runCatching { audioManager.setStreamVolume(AudioManager.STREAM_ALARM, it, 0) }
+            savedAlarmVolume = null
+        }
     }
 
     // ---- Call control -------------------------------------------------
@@ -247,7 +253,6 @@ class SipEngine(
                         remoteNumber = remote,
                         remoteName = directory.lookupName(remote)
                             ?: call.remoteAddress.displayName,
-                        groupName = extractGroupName(call),
                     )
                 }
                 Call.State.OutgoingInit, Call.State.OutgoingProgress, Call.State.OutgoingRinging -> {
@@ -282,41 +287,17 @@ class SipEngine(
         }
     }
 
-    /**
-     * Best-effort extraction of the ring-group identity from the INVITE.
-     * Currently a guess based on the To header; finalised once the debug
-     * dump confirms which header Talk populates.
-     */
-    private fun extractGroupName(call: Call): String? {
-        return runCatching {
-            val to = call.toAddress
-            val toDisplay = to?.displayName
-            val toUser = to?.username
-            when {
-                !toDisplay.isNullOrBlank() -> toDisplay
-                !toUser.isNullOrBlank() && toUser != currentSettings?.sipUsername -> toUser
-                else -> null
-            }
-        }.getOrNull()
-    }
-
-    /**
-     * DIAGNOSTIC: append the headers that might carry the ring-group name to
-     * a text file the user can copy off the phone:
-     *   Android/data/au.josh.unifiphone/files/sip_debug.log
-     */
+    /** Diagnostic: append incoming-call headers to a copyable log file. */
     private fun dumpIncomingHeaders(call: Call) {
         runCatching {
             val ts = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
             val sb = StringBuilder()
             sb.appendLine("==== INCOMING CALL $ts ====")
-
             val to = call.toAddress
             sb.appendLine("TO   uri=${to?.asStringUriOnly()} user=${to?.username} display=${to?.displayName}")
             val from = call.remoteAddress
             sb.appendLine("FROM uri=${from.asStringUriOnly()} user=${from.username} display=${from.displayName}")
             sb.appendLine("remoteContact=${call.remoteContact}")
-
             val candidates = listOf(
                 "To", "From", "Contact",
                 "P-Called-Party-ID", "P-Asserted-Identity", "P-Preferred-Identity",
@@ -329,11 +310,8 @@ class SipEngine(
                 if (!v.isNullOrBlank()) sb.appendLine("HDR $h = $v")
             }
             sb.appendLine()
-
-            // externalFilesDir is user-visible over USB / file manager
             val dir = context.getExternalFilesDir(null) ?: context.filesDir
-            val logFile = File(dir, "sip_debug.log")
-            logFile.appendText(sb.toString())
+            File(dir, "sip_debug.log").appendText(sb.toString())
         }
     }
 
