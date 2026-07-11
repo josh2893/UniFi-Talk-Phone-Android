@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.UniFiPhone" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0E1420</item>
+        <item name="android:statusBarColor">#0E1420</item>
+    </style>
+</resources>
