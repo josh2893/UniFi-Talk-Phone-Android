@@ -22,6 +22,9 @@ import org.linphone.core.Factory
 import org.linphone.core.RegistrationState
 import org.linphone.core.TransportType
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 enum class RegState { NONE, PROGRESS, OK, FAILED }
 
@@ -30,6 +33,7 @@ data class CallUiState(
     val incoming: Boolean = false,
     val remoteNumber: String = "",
     val remoteName: String? = null,
+    val groupName: String? = null,
     val connected: Boolean = false,
     val muted: Boolean = false,
     val speaker: Boolean = false,
@@ -236,12 +240,14 @@ class SipEngine(
                 Call.State.IncomingReceived, Call.State.IncomingEarlyMedia -> {
                     callWasIncoming = true
                     callAnsweredAt = 0L
+                    dumpIncomingHeaders(call)
                     startRinging()
                     _callState.value = CallUiState(
                         active = true, incoming = true,
                         remoteNumber = remote,
                         remoteName = directory.lookupName(remote)
                             ?: call.remoteAddress.displayName,
+                        groupName = extractGroupName(call),
                     )
                 }
                 Call.State.OutgoingInit, Call.State.OutgoingProgress, Call.State.OutgoingRinging -> {
@@ -273,6 +279,61 @@ class SipEngine(
                 }
                 else -> Unit
             }
+        }
+    }
+
+    /**
+     * Best-effort extraction of the ring-group identity from the INVITE.
+     * Currently a guess based on the To header; finalised once the debug
+     * dump confirms which header Talk populates.
+     */
+    private fun extractGroupName(call: Call): String? {
+        return runCatching {
+            val to = call.toAddress
+            val toDisplay = to?.displayName
+            val toUser = to?.username
+            when {
+                !toDisplay.isNullOrBlank() -> toDisplay
+                !toUser.isNullOrBlank() && toUser != currentSettings?.sipUsername -> toUser
+                else -> null
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * DIAGNOSTIC: append the headers that might carry the ring-group name to
+     * a text file the user can copy off the phone:
+     *   Android/data/au.josh.unifiphone/files/sip_debug.log
+     */
+    private fun dumpIncomingHeaders(call: Call) {
+        runCatching {
+            val ts = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+            val sb = StringBuilder()
+            sb.appendLine("==== INCOMING CALL $ts ====")
+
+            val to = call.toAddress
+            sb.appendLine("TO   uri=${to?.asStringUriOnly()} user=${to?.username} display=${to?.displayName}")
+            val from = call.remoteAddress
+            sb.appendLine("FROM uri=${from.asStringUriOnly()} user=${from.username} display=${from.displayName}")
+            sb.appendLine("remoteContact=${call.remoteContact}")
+
+            val candidates = listOf(
+                "To", "From", "Contact",
+                "P-Called-Party-ID", "P-Asserted-Identity", "P-Preferred-Identity",
+                "Diversion", "History-Info", "Referred-By",
+                "X-Group", "X-Group-Name", "Alert-Info", "Call-Info",
+                "Subject", "Remote-Party-ID"
+            )
+            for (h in candidates) {
+                val v = call.remoteParams?.getCustomHeader(h)
+                if (!v.isNullOrBlank()) sb.appendLine("HDR $h = $v")
+            }
+            sb.appendLine()
+
+            // externalFilesDir is user-visible over USB / file manager
+            val dir = context.getExternalFilesDir(null) ?: context.filesDir
+            val logFile = File(dir, "sip_debug.log")
+            logFile.appendText(sb.toString())
         }
     }
 

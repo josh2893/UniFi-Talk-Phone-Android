@@ -60,13 +60,20 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(48.dp))
+	Spacer(Modifier.height(48.dp))
+        if (call.incoming && call.groupName != null) {
+            Text(
+                text = "Group · ${call.groupName}",
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(4.dp))
+        }
         Text(
             text = call.remoteName ?: call.remoteNumber,
             fontSize = 30.sp,
             fontWeight = FontWeight.SemiBold,
-        )
-        if (call.remoteName != null) {
+        )        if (call.remoteName != null) {
             Text(
                 text = call.remoteNumber,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
