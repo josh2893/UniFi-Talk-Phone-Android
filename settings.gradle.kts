@@ -11,7 +11,10 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         // Linphone SDK (SIP/RTP stack)
-        maven { url = uri("https://linphone.org/maven_repository") }
+        maven {
+            url = uri("https://download.linphone.org/maven_repository")
+            content { includeGroup("org.linphone") }
+        }
     }
 }
 rootProject.name = "UniFiPhone"

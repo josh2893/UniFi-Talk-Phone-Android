@@ -35,7 +35,7 @@ android {
 
 dependencies {
     // SIP / media stack
-    implementation("org.linphone:linphone-sdk-android:5.3.+")
+    implementation("org.linphone:linphone-sdk-android:5.3.101")
 
     val composeBom = platform("androidx.compose:compose-bom:2024.09.03")
     implementation(composeBom)
