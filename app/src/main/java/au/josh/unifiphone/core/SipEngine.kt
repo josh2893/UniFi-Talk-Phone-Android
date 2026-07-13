@@ -106,6 +106,7 @@ class SipEngine(
             user = s.sipUsername,
             password = s.sipPassword,
             listener = sipListener,
+            tracer = ::traceSip,
         )
         sip = client
         Thread { client.start() }.start()
@@ -389,6 +390,16 @@ class SipEngine(
     }
 
     // ---- Diagnostics / history -------------------------------------------
+
+    /** Full SIP wire trace -> sip_debug.log (capped at ~2 MB). */
+    private fun traceSip(text: String) {
+        runCatching {
+            val dir = context.getExternalFilesDir(null) ?: context.filesDir
+            val f = File(dir, "sip_debug.log")
+            if (f.length() > 2_000_000) f.writeText("")
+            f.appendText("---- ${System.currentTimeMillis()} ----\n$text\n")
+        }
+    }
 
     private fun dumpIncomingHeaders(invite: SipMessage) {
         runCatching {

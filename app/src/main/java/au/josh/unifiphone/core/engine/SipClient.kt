@@ -31,6 +31,8 @@ class SipClient(
     private val user: String,
     private val password: String,
     private val listener: Listener,
+    /** Optional wire trace: every SIP message in/out, for sip_debug.log. */
+    private val tracer: ((String) -> Unit)? = null,
 ) {
     interface Listener {
         fun onRegistered()
@@ -53,6 +55,8 @@ class SipClient(
         var localSdp: String = "",
         var pendingInvite: SipMessage? = null, // for CANCEL / auth retry
         var answered: Boolean = false,
+        var lastResponse: SipMessage? = null,  // resent on INVITE retransmission
+        var awaitingAck: Boolean = false,      // 200 OK retransmit until ACK
     )
 
     private lateinit var socket: DatagramSocket
@@ -202,7 +206,19 @@ class SipClient(
         }
         // Our To-tag was already assigned when we sent 180.
         resp.set("To", "${inv.header("To")};tag=${d.localTag}")
+        d.lastResponse = resp
+        d.awaitingAck = true
         send(resp)
+        // RFC 3261 17.2.1: retransmit 2xx until ACK (UDP). LAN-scaled: 500 ms x 8.
+        var attempts = 0
+        timer?.scheduleAtFixedRate(object : TimerTask() {
+            override fun run() {
+                if (!d.awaitingAck || attempts++ >= 8 || !dialogs.containsKey(d.callId)) {
+                    cancel(); return
+                }
+                send(resp)
+            }
+        }, 500L, 500L)
     }
 
     fun decline(d: Dialog, code: Int = 486, reason: String = "Busy Here") {
@@ -220,7 +236,9 @@ class SipClient(
         val dp = DatagramPacket(buf, buf.size)
         while (running.get()) {
             try {
+                dp.setLength(buf.size) // CRITICAL: DatagramPacket length shrinks after each receive
                 socket.receive(dp)
+                trace("<<< ", buf, dp.length)
                 val msg = SipMessage.parse(buf, dp.length) ?: continue
                 if (msg.isRequest) handleRequest(msg, dp.socketAddress as InetSocketAddress)
                 else handleResponse(msg)
@@ -285,7 +303,14 @@ class SipClient(
             "INVITE" -> {
                 val existing = dialogs[callId]
                 if (existing != null) {
-                    // Re-INVITE (hold / session refresh): answer with our current SDP.
+                    if (msg.cseqNumber() <= existing.remoteCseq) {
+                        // Retransmission of an INVITE we already saw: resend our
+                        // last response rather than treating it as a re-INVITE.
+                        existing.lastResponse?.let { send(it) }
+                        return
+                    }
+                    // Genuine re-INVITE (hold / session refresh): answer with current SDP.
+                    existing.remoteCseq = msg.cseqNumber()
                     existing.pendingInvite = msg
                     val resp = response(msg, 200, "OK").apply {
                         set("Contact", "<sip:$user@$localIp:$localPort;transport=udp>")
@@ -293,6 +318,7 @@ class SipClient(
                         body = existing.localSdp.toByteArray()
                     }
                     resp.set("To", "${msg.header("To")};tag=${existing.localTag}")
+                    existing.lastResponse = resp
                     send(resp)
                     return
                 }
@@ -314,12 +340,13 @@ class SipClient(
                 val ringing = response(msg, 180, "Ringing")
                 ringing.set("To", "${msg.header("To")};tag=${d.localTag}")
                 ringing.set("Contact", "<sip:$user@$localIp:$localPort;transport=udp>")
+                d.lastResponse = ringing
                 send(ringing)
                 val fromUser = Regex("sip:([^@;>]+)").find(msg.header("From") ?: "")?.groupValues?.get(1) ?: "?"
                 val display = Regex("^\"([^\"]+)\"").find((msg.header("From") ?: "").trim())?.groupValues?.get(1)
                 listener.onIncomingCall(d, fromUser, display, offer, msg)
             }
-            "ACK" -> { /* completes our 200; media should already be flowing */ }
+            "ACK" -> { dialogs[callId]?.awaitingAck = false }
             "BYE" -> {
                 send(response(msg, 200, "OK"))
                 dialogs[callId]?.let { endDialog(it, "remote hangup") }
@@ -393,7 +420,13 @@ class SipClient(
     private fun send(msg: SipMessage) {
         val addr = serverAddr ?: return
         val data = msg.serialize()
+        trace(">>> ", data, data.size)
         runCatching { socket.send(DatagramPacket(data, data.size, addr, serverPort)) }
+    }
+
+    private fun trace(dir: String, data: ByteArray, len: Int) {
+        val t = tracer ?: return
+        runCatching { t(dir + String(data, 0, len, Charsets.UTF_8)) }
     }
 
     private fun via(): String =

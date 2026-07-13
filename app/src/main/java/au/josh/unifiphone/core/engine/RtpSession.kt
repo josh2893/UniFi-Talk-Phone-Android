@@ -77,6 +77,7 @@ class RtpSession(
         val dp = DatagramPacket(buf, buf.size)
         while (running.get()) {
             try {
+                dp.setLength(buf.size) // CRITICAL: DatagramPacket length shrinks after each receive
                 socket.receive(dp)
                 if (rtcp) handleRtcp(buf, dp.length) else handleRtp(buf, dp.length)
             } catch (_: Exception) {
