@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
 
         val wanted = buildList {
             add(Manifest.permission.RECORD_AUDIO)
+            add(Manifest.permission.CAMERA)
             if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
         }
         permissionLauncher.launch(wanted.toTypedArray())

@@ -34,8 +34,7 @@ android {
 }
 
 dependencies {
-    // SIP / media stack
-    implementation("org.linphone:linphone-sdk-android:5.3.101")
+    // SIP / media stack: pure-Kotlin engine in core/engine (no native SDK)
 
     val composeBom = platform("androidx.compose:compose-bom:2024.09.03")
     implementation(composeBom)

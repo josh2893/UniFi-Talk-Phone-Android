@@ -32,6 +32,11 @@ data class AppSettings(
 
     // Ringtone: "raw:<resName>" for a bundled tone, "file:<path>" for imported
     val ringtone: String = "raw:ringtone_classic",
+
+    // Video calling: when ON, calls placed from the dial pad are offered as
+    // H.265 video calls. When OFF, outgoing calls are audio-only but the
+    // phone still ACCEPTS incoming video calls.
+    val videoCalls: Boolean = false,
 )
 
 class SettingsRepository(private val context: Context) {
@@ -47,6 +52,7 @@ class SettingsRepository(private val context: Context) {
         val THEME = stringPreferencesKey("theme_mode")
         val KIOSK = booleanPreferencesKey("kiosk_enabled")
         val RINGTONE = stringPreferencesKey("ringtone")
+        val VIDEO_CALLS = booleanPreferencesKey("video_calls")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -63,6 +69,7 @@ class SettingsRepository(private val context: Context) {
                 .getOrDefault(ThemeMode.SYSTEM),
             kioskEnabled = p[Keys.KIOSK] ?: false,
             ringtone = p[Keys.RINGTONE] ?: "raw:ringtone_classic",
+            videoCalls = p[Keys.VIDEO_CALLS] ?: false,
         )
     }
 
@@ -81,6 +88,7 @@ class SettingsRepository(private val context: Context) {
             p[Keys.THEME] = next.themeMode.name
             p[Keys.KIOSK] = next.kioskEnabled
             p[Keys.RINGTONE] = next.ringtone
+            p[Keys.VIDEO_CALLS] = next.videoCalls
         }
     }
 }

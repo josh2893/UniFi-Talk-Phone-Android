@@ -147,6 +147,13 @@ fun SettingsScreen(vm: PhoneViewModel) {
                 checked = settings.showMissedCalls,
                 onChange = { vm.updateSettings { s -> s.copy(showMissedCalls = it) } },
             )
+            ToggleRow(
+                title = "Video calls",
+                subtitle = "Place dial pad calls as H.265 video calls. " +
+                    "When off, incoming video calls are still accepted.",
+                checked = settings.videoCalls,
+                onChange = { vm.updateSettings { s -> s.copy(videoCalls = it) } },
+            )
         }
 
         SectionCard("Appearance") {

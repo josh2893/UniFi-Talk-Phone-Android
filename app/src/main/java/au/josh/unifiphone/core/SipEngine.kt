@@ -4,28 +4,29 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.view.Surface
+import au.josh.unifiphone.core.engine.AudioStream
+import au.josh.unifiphone.core.engine.RtpSession
+import au.josh.unifiphone.core.engine.Sdp
+import au.josh.unifiphone.core.engine.SdpSession
+import au.josh.unifiphone.core.engine.SipClient
+import au.josh.unifiphone.core.engine.SipMessage
+import au.josh.unifiphone.core.engine.VideoReceiver
+import au.josh.unifiphone.core.engine.VideoSender
 import au.josh.unifiphone.data.AppSettings
 import au.josh.unifiphone.data.CallRecord
 import au.josh.unifiphone.data.DirectoryRepository
-import au.josh.unifiphone.data.Transport
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import org.linphone.core.Account
-import org.linphone.core.AudioDevice
-import org.linphone.core.Call
-import org.linphone.core.Core
-import org.linphone.core.CoreListenerStub
-import org.linphone.core.Factory
-import org.linphone.core.RegistrationState
-import org.linphone.core.TransportType
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.random.Random
 
 enum class RegState { NONE, PROGRESS, OK, FAILED }
 
@@ -39,89 +40,299 @@ data class CallUiState(
     val speaker: Boolean = false,
     val onHold: Boolean = false,
     val startedAtMs: Long = 0L,
+    /** True when a video stream is negotiated on this call. */
+    val videoActive: Boolean = false,
 )
 
+/**
+ * SIP engine v2 — pure-Kotlin SIP/RTP stack replacing the Linphone SDK.
+ *
+ * Wire format is exactly what UniFi Talk handsets speak (verified via fs_cli
+ * captures of handset<->handset video calls):
+ *   - SIP over UDP, digest auth on REGISTER and INVITE
+ *   - plain RTP/AVP (no SRTP/ICE/DTLS) — Talk's route_to_video dialplan sets
+ *     bypass_media=true so SDP travels end-to-end
+ *   - audio: PCMU (G.711 µ-law) + RFC2833 DTMF
+ *   - video: H.265 payload 96, RFC 7798, PLI/FIR keyframe requests
+ */
 class SipEngine(
     private val context: Context,
     private val directory: DirectoryRepository,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
-    private lateinit var core: Core
-    private var account: Account? = null
+    private var sip: SipClient? = null
     private var currentSettings: AppSettings? = null
 
+    // Per-call media state
+    private var dialog: SipClient.Dialog? = null
+    private var audioRtp: RtpSession? = null
+    private var videoRtp: RtpSession? = null
+    private var audio: AudioStream? = null
+    private var videoRx: VideoReceiver? = null
+    private var videoTx: VideoSender? = null
+    private var pendingOffer: SdpSession? = null
+    private var pendingRemoteSurface: Surface? = null
+
     private var ringPlayer: MediaPlayer? = null
-    private val audioManager get() =
-        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private val audioManager get() = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var savedAlarmVolume: Int? = null
 
     private val _regState = MutableStateFlow(RegState.NONE)
     val regState: StateFlow<RegState> = _regState
-
     private val _regDetail = MutableStateFlow("")
     val regDetail: StateFlow<String> = _regDetail
-
     private val _callState = MutableStateFlow(CallUiState())
     val callState: StateFlow<CallUiState> = _callState
 
     private var callAnsweredAt = 0L
     private var callWasIncoming = false
 
-    fun start() {
-        val factory = Factory.instance()
-        factory.setDebugMode(false, "UniFiPhone")
-        core = factory.createCore(null, null, context)
-        core.isPushNotificationEnabled = false
-        core.isVideoCaptureEnabled = false
-        core.isVideoDisplayEnabled = false
-        core.isNativeRingingEnabled = false
-        core.ring = null
-        core.maxCalls = 2
-        core.addListener(listener)
-        core.start()
-    }
+    fun start() { /* stack starts on applySettings */ }
 
     fun applySettings(s: AppSettings) {
         currentSettings = s
-
-        account?.let { existing ->
-            core.removeAccount(existing)
-            core.clearAllAuthInfo()
-            account = null
-        }
+        sip?.stop(); sip = null
         if (s.sipServer.isBlank() || s.sipUsername.isBlank()) {
             _regState.value = RegState.NONE
             _regDetail.value = "Not configured"
             return
         }
+        _regState.value = RegState.PROGRESS
+        _regDetail.value = "Registering…"
+        val client = SipClient(
+            server = s.sipServer,
+            serverPort = s.sipPort.toIntOrNull() ?: 5060,
+            user = s.sipUsername,
+            password = s.sipPassword,
+            listener = sipListener,
+        )
+        sip = client
+        Thread { client.start() }.start()
+    }
 
-        val factory = Factory.instance()
-        val transport = when (s.transport) {
-            Transport.UDP -> TransportType.Udp
-            Transport.TCP -> TransportType.Tcp
-            Transport.TLS -> TransportType.Tls
+    // ---- Call control -------------------------------------------------
+
+    fun dial(rawTarget: String) {
+        val s = currentSettings ?: return
+        val client = sip ?: return
+        if (rawTarget.isBlank() || dialog != null) return
+
+        val withVideo = s.videoCalls
+        setupMedia(video = withVideo)
+        val sdp = Sdp.build(
+            localIp = client.localIp,
+            user = s.sipUsername,
+            audioPort = audioRtp!!.localRtpPort,
+            videoPort = if (withVideo) videoRtp!!.localRtpPort else null,
+            sessionId = Random.nextLong(1000, 99999),
+            sessionVersion = Random.nextLong(1000, 99999),
+        )
+        callWasIncoming = false
+        callAnsweredAt = 0L
+        dialog = client.invite(rawTarget, sdp)
+        dialog?.localSdp = sdp
+        _callState.value = CallUiState(
+            active = true, incoming = false,
+            remoteNumber = rawTarget,
+            remoteName = directory.lookupName(rawTarget),
+            videoActive = withVideo,
+        )
+    }
+
+    fun accept() {
+        val d = dialog ?: return
+        val client = sip ?: return
+        val s = currentSettings ?: return
+        val offer = pendingOffer ?: return
+        stopRinging()
+
+        // Video is answered whenever offered — toggle only controls outgoing.
+        val remoteVideo = offer.video()
+        val withVideo = remoteVideo != null
+        setupMedia(video = withVideo)
+
+        offer.audio()?.let { audioRtp?.setRemote(offer.remoteIp, it.port) }
+        remoteVideo?.let { videoRtp?.setRemote(offer.remoteIp, it.port) }
+
+        val answer = Sdp.build(
+            localIp = client.localIp,
+            user = s.sipUsername,
+            audioPort = audioRtp!!.localRtpPort,
+            videoPort = if (withVideo) videoRtp!!.localRtpPort else null,
+            sessionId = Random.nextLong(1000, 99999),
+            sessionVersion = Random.nextLong(1000, 99999),
+        )
+        client.accept(d, answer)
+        startMedia(sendVideo = withVideo)
+        callAnsweredAt = System.currentTimeMillis()
+        _callState.value = _callState.value.copy(
+            incoming = false, connected = true,
+            startedAtMs = callAnsweredAt, videoActive = withVideo,
+        )
+    }
+
+    fun hangup() {
+        val d = dialog ?: return
+        stopRinging()
+        sip?.bye(d)
+        // onCallEnded will tear down media
+    }
+
+    fun decline() {
+        val d = dialog ?: return
+        stopRinging()
+        sip?.decline(d)
+    }
+
+    fun toggleMute() {
+        val a = audio ?: return
+        a.muted = !a.muted
+        _callState.value = _callState.value.copy(muted = a.muted)
+    }
+
+    /**
+     * v1 hold = local mute of both directions. A SIP hold (re-INVITE
+     * a=sendonly) is on the roadmap; this keeps the dialog untouched.
+     */
+    fun toggleHold() {
+        val holding = !_callState.value.onHold
+        audio?.muted = holding
+        _callState.value = _callState.value.copy(onHold = holding, muted = holding)
+    }
+
+    fun toggleSpeaker() {
+        val want = !_callState.value.speaker
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        @Suppress("DEPRECATION")
+        audioManager.isSpeakerphoneOn = want
+        _callState.value = _callState.value.copy(speaker = want)
+    }
+
+    fun sendDtmf(digits: String) {
+        for (c in digits) audio?.sendDtmf(c)
+    }
+
+    /** CallScreen hands us the SurfaceView surface for remote video. */
+    fun attachRemoteVideoSurface(surface: Surface) {
+        pendingRemoteSurface = surface
+        videoRx?.attachSurface(surface)
+    }
+
+    // ---- SIP listener ---------------------------------------------------
+
+    private val sipListener = object : SipClient.Listener {
+        override fun onRegistered() {
+            _regState.value = RegState.OK
+            _regDetail.value = "Registered"
         }
 
-        val params = core.createAccountParams()
-        val identity = factory.createAddress("sip:${s.sipUsername}@${s.sipServer}")
-        params.identityAddress = identity
-        val server = factory.createAddress("sip:${s.sipServer}:${s.sipPort}")
-        server?.transport = transport
-        params.serverAddress = server
-        params.isRegisterEnabled = true
-        params.expires = 300
+        override fun onRegistrationFailed(reason: String) {
+            _regState.value = RegState.FAILED
+            _regDetail.value = reason
+        }
 
-        val auth = factory.createAuthInfo(
-            s.sipUsername, null, s.sipPassword, null, null, s.sipServer, null
-        )
-        core.addAuthInfo(auth)
+        override fun onIncomingCall(
+            call: SipClient.Dialog, from: String, fromDisplay: String?,
+            offer: SdpSession, rawInvite: SipMessage,
+        ) {
+            if (dialog != null) { sip?.decline(call); return }
+            dialog = call
+            pendingOffer = offer
+            callWasIncoming = true
+            callAnsweredAt = 0L
+            dumpIncomingHeaders(rawInvite)
+            scope.launch {
+                startRinging()
+                _callState.value = CallUiState(
+                    active = true, incoming = true,
+                    remoteNumber = from,
+                    remoteName = directory.lookupName(from) ?: fromDisplay,
+                    videoActive = offer.video() != null,
+                )
+            }
+        }
 
-        val acc = core.createAccount(params)
-        core.addAccount(acc)
-        core.defaultAccount = acc
-        account = acc
+        override fun onCallRinging(call: SipClient.Dialog) { /* UI already shows outgoing */ }
+
+        override fun onCallAnswered(call: SipClient.Dialog, answer: SdpSession) {
+            val audioMedia = answer.audio() ?: run { hangup(); return }
+            audioRtp?.setRemote(answer.remoteIp, audioMedia.port)
+            val videoMedia = answer.video()
+            val videoUp = videoMedia != null && videoRtp != null
+            videoMedia?.let { videoRtp?.setRemote(answer.remoteIp, it.port) }
+            startMedia(sendVideo = videoUp)
+            callAnsweredAt = System.currentTimeMillis()
+            scope.launch {
+                _callState.value = _callState.value.copy(
+                    connected = true, startedAtMs = callAnsweredAt,
+                    videoActive = videoUp,
+                )
+            }
+        }
+
+        override fun onCallEnded(call: SipClient.Dialog, reason: String) {
+            if (call.callId != dialog?.callId) return
+            scope.launch {
+                stopRinging()
+                if (_callState.value.active) recordHistory(_callState.value.remoteNumber)
+                teardownMedia()
+                dialog = null
+                pendingOffer = null
+                _callState.value = CallUiState()
+            }
+        }
     }
+
+    // ---- Media plumbing -------------------------------------------------
+
+    private fun setupMedia(video: Boolean) {
+        teardownMedia()
+        val aPort = RtpSession.allocatePortPair()
+        audioRtp = RtpSession(aPort, onPacket = { pt, _, _, _, payload ->
+            audio?.onRtpAudio(pt, payload)
+        })
+        audio = AudioStream(audioRtp!!)
+        if (video) {
+            val vPort = RtpSession.allocatePortPair()
+            videoRtp = RtpSession(
+                vPort,
+                onPacket = { pt, marker, seq, _, payload ->
+                    if (pt == Sdp.PT_H265) videoRx?.onRtpVideo(seq, marker, payload)
+                },
+                onKeyframeRequest = { videoTx?.requestKeyframe() },
+            )
+            videoRx = VideoReceiver(videoRtp!!)
+            videoTx = VideoSender(context, videoRtp!!)
+            pendingRemoteSurface?.let { videoRx?.attachSurface(it) }
+        }
+    }
+
+    private fun startMedia(sendVideo: Boolean) {
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        audioRtp?.start()
+        audio?.start()
+        if (videoRtp != null) {
+            videoRtp?.start()
+            videoRx?.start()
+            if (sendVideo) videoTx?.start()
+        }
+    }
+
+    private fun teardownMedia() {
+        runCatching { audio?.stop() }
+        runCatching { videoTx?.stop() }
+        runCatching { videoRx?.stop() }
+        runCatching { audioRtp?.close() }
+        runCatching { videoRtp?.close() }
+        audio = null; videoTx = null; videoRx = null
+        audioRtp = null; videoRtp = null
+        audioManager.mode = AudioManager.MODE_NORMAL
+        @Suppress("DEPRECATION")
+        audioManager.isSpeakerphoneOn = false
+    }
+
+    // ---- Ringing (unchanged behaviour from v1) ---------------------------
 
     private fun resolveRingtonePath(spec: String): String? = when {
         spec.startsWith("raw:") -> {
@@ -146,12 +357,9 @@ class SipEngine(
         val spec = currentSettings?.ringtone ?: "raw:ringtone_classic"
         val path = resolveRingtonePath(spec) ?: return
         runCatching {
-            // Force the alarm stream to max for the duration of ringing —
-            // alarm is the loudest path and rings through silent/DND.
             val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
             savedAlarmVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
             audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxVol, 0)
-
             ringPlayer = MediaPlayer().apply {
                 setAudioAttributes(
                     AudioAttributes.Builder()
@@ -174,148 +382,37 @@ class SipEngine(
             release()
         }
         ringPlayer = null
-        // Restore the user's alarm volume
         savedAlarmVolume?.let {
             runCatching { audioManager.setStreamVolume(AudioManager.STREAM_ALARM, it, 0) }
             savedAlarmVolume = null
         }
     }
 
-    // ---- Call control -------------------------------------------------
+    // ---- Diagnostics / history -------------------------------------------
 
-    fun dial(rawTarget: String) {
-        val s = currentSettings ?: return
-        if (rawTarget.isBlank() || s.sipServer.isBlank()) return
-        val address = core.interpretUrl("sip:${rawTarget}@${s.sipServer}", false) ?: return
-        val params = core.createCallParams(null)
-        core.inviteAddressWithParams(address, params ?: return)
-    }
-
-    fun accept() { core.currentCall?.accept() }
-
-    fun hangup() {
-        core.currentCall?.terminate() ?: core.calls.firstOrNull()?.terminate()
-    }
-
-    fun decline() { core.currentCall?.decline(org.linphone.core.Reason.Declined) }
-
-    fun toggleMute() {
-        core.isMicEnabled = !core.isMicEnabled
-        _callState.value = _callState.value.copy(muted = !core.isMicEnabled)
-    }
-
-    fun toggleHold() {
-        val call = core.currentCall ?: core.calls.firstOrNull() ?: return
-        if (call.state == Call.State.Paused) call.resume() else call.pause()
-    }
-
-    fun toggleSpeaker() {
-        val call = core.currentCall ?: return
-        val want = if (_callState.value.speaker) AudioDevice.Type.Earpiece else AudioDevice.Type.Speaker
-        val device = core.audioDevices.firstOrNull {
-            it.type == want && it.hasCapability(AudioDevice.Capabilities.CapabilityPlay)
-        } ?: return
-        call.outputAudioDevice = device
-        _callState.value = _callState.value.copy(speaker = want == AudioDevice.Type.Speaker)
-    }
-
-    fun sendDtmf(digits: String) {
-        core.currentCall?.sendDtmfs(digits)
-    }
-
-    // ---- Listener -----------------------------------------------------
-
-    private val listener = object : CoreListenerStub() {
-        override fun onAccountRegistrationStateChanged(
-            core: Core, account: Account, state: RegistrationState?, message: String
-        ) {
-            _regDetail.value = message
-            _regState.value = when (state) {
-                RegistrationState.Ok -> RegState.OK
-                RegistrationState.Progress, RegistrationState.Refreshing -> RegState.PROGRESS
-                RegistrationState.Failed -> RegState.FAILED
-                else -> RegState.NONE
-            }
-        }
-
-        override fun onCallStateChanged(
-            core: Core, call: Call, state: Call.State?, message: String
-        ) {
-            val remote = call.remoteAddress.username ?: call.remoteAddress.asStringUriOnly()
-            when (state) {
-                Call.State.IncomingReceived, Call.State.IncomingEarlyMedia -> {
-                    callWasIncoming = true
-                    callAnsweredAt = 0L
-                    dumpIncomingHeaders(call)
-                    startRinging()
-                    _callState.value = CallUiState(
-                        active = true, incoming = true,
-                        remoteNumber = remote,
-                        remoteName = directory.lookupName(remote)
-                            ?: call.remoteAddress.displayName,
-                    )
-                }
-                Call.State.OutgoingInit, Call.State.OutgoingProgress, Call.State.OutgoingRinging -> {
-                    callWasIncoming = false
-                    callAnsweredAt = 0L
-                    _callState.value = CallUiState(
-                        active = true, incoming = false,
-                        remoteNumber = remote,
-                        remoteName = directory.lookupName(remote),
-                    )
-                }
-                Call.State.Connected, Call.State.StreamsRunning -> {
-                    stopRinging()
-                    if (callAnsweredAt == 0L) callAnsweredAt = System.currentTimeMillis()
-                    _callState.value = _callState.value.copy(
-                        incoming = false, connected = true, onHold = false,
-                        startedAtMs = callAnsweredAt,
-                        muted = !core.isMicEnabled,
-                    )
-                }
-                Call.State.Paused, Call.State.PausedByRemote -> {
-                    _callState.value = _callState.value.copy(onHold = true)
-                }
-                Call.State.End, Call.State.Error, Call.State.Released -> {
-                    stopRinging()
-                    if (_callState.value.active) recordHistory(call, remote)
-                    _callState.value = CallUiState()
-                    core.isMicEnabled = true
-                }
-                else -> Unit
-            }
-        }
-    }
-
-    /** Diagnostic: append incoming-call headers to a copyable log file. */
-    private fun dumpIncomingHeaders(call: Call) {
+    private fun dumpIncomingHeaders(invite: SipMessage) {
         runCatching {
             val ts = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
             val sb = StringBuilder()
             sb.appendLine("==== INCOMING CALL $ts ====")
-            val to = call.toAddress
-            sb.appendLine("TO   uri=${to?.asStringUriOnly()} user=${to?.username} display=${to?.displayName}")
-            val from = call.remoteAddress
-            sb.appendLine("FROM uri=${from.asStringUriOnly()} user=${from.username} display=${from.displayName}")
-            sb.appendLine("remoteContact=${call.remoteContact}")
             val candidates = listOf(
                 "To", "From", "Contact",
                 "P-Called-Party-ID", "P-Asserted-Identity", "P-Preferred-Identity",
                 "Diversion", "History-Info", "Referred-By",
                 "X-Group", "X-Group-Name", "Alert-Info", "Call-Info",
-                "Subject", "Remote-Party-ID"
+                "Subject", "Remote-Party-ID",
             )
             for (h in candidates) {
-                val v = call.remoteParams?.getCustomHeader(h)
-                if (!v.isNullOrBlank()) sb.appendLine("HDR $h = $v")
+                for (v in invite.headerAll(h)) sb.appendLine("HDR $h = $v")
             }
+            sb.appendLine("SDP:").appendLine(String(invite.body))
             sb.appendLine()
             val dir = context.getExternalFilesDir(null) ?: context.filesDir
             File(dir, "sip_debug.log").appendText(sb.toString())
         }
     }
 
-    private fun recordHistory(call: Call, remote: String) {
+    private fun recordHistory(remote: String) {
         val answered = callAnsweredAt != 0L
         val duration = if (answered)
             ((System.currentTimeMillis() - callAnsweredAt) / 1000).toInt() else 0

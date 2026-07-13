@@ -33,6 +33,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.view.SurfaceHolder
+import android.view.SurfaceView
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.viewinterop.AndroidView
 import au.josh.unifiphone.PhoneViewModel
 import au.josh.unifiphone.core.CallUiState
 import au.josh.unifiphone.ui.Keypad
@@ -83,6 +90,27 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
             color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.Medium,
         )
+
+        if (call.videoActive && call.connected) {
+            Spacer(Modifier.height(16.dp))
+            AndroidView(
+                factory = { ctx ->
+                    SurfaceView(ctx).apply {
+                        holder.addCallback(object : SurfaceHolder.Callback {
+                            override fun surfaceCreated(h: SurfaceHolder) {
+                                vm.engine.attachRemoteVideoSurface(h.surface)
+                            }
+                            override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, ht: Int) {}
+                            override fun surfaceDestroyed(h: SurfaceHolder) {}
+                        })
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(16.dp)),
+            )
+        }
 
         Spacer(Modifier.weight(1f))
 
