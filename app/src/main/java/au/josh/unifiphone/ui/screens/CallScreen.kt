@@ -39,6 +39,8 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.viewinterop.AndroidView
 import au.josh.unifiphone.PhoneViewModel
 import au.josh.unifiphone.core.CallUiState
@@ -91,6 +93,13 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
             fontWeight = FontWeight.Medium,
         )
 
+        // Keep the screen awake for the whole call (video especially).
+        val view = LocalView.current
+        DisposableEffect(call.active) {
+            view.keepScreenOn = call.active
+            onDispose { view.keepScreenOn = false }
+        }
+
         if (call.videoActive && call.connected) {
             Spacer(Modifier.height(16.dp))
             AndroidView(
@@ -107,7 +116,7 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
+                    .aspectRatio(9f / 16f)
                     .clip(RoundedCornerShape(16.dp)),
             )
         }

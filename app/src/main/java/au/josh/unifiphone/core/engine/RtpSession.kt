@@ -27,18 +27,45 @@ class RtpSession(
 
     private var remoteAddr: InetAddress? = null
     private var remoteRtpPort = 0
+    private var remoteRtcpPort = 0
 
     private var seq = Random.nextInt(0, 0x7FFF)
     private var remoteSsrc = 0L
 
-    fun setRemote(ip: String, rtpPort: Int) {
+    /**
+     * [rtcpPort] from the SDP a=rtcp: attribute when present. Talk handsets use
+     * NON-adjacent RTCP ports (e.g. m=video 53378 / a=rtcp:36768) — assuming
+     * rtp+1 sends keyframe requests into a void, which shows up as video that
+     * freezes on the first lost packet and never recovers.
+     */
+    fun setRemote(ip: String, rtpPort: Int, rtcpPort: Int? = null) {
         remoteAddr = InetAddress.getByName(ip)
         remoteRtpPort = rtpPort
+        remoteRtcpPort = rtcpPort ?: (rtpPort + 1)
     }
 
     fun start() {
         Thread({ receiveLoop(rtpSocket, rtcp = false) }, "rtp-recv-$localRtpPort").start()
         Thread({ receiveLoop(rtcpSocket, rtcp = true) }, "rtcp-recv-$localRtpPort").start()
+        // RTCP keepalive: empty Receiver Report every 2 s so the far end knows
+        // our RTCP path is alive (some stacks stop sending without it).
+        Thread({
+            while (running.get()) {
+                runCatching { sendEmptyRr() }
+                Thread.sleep(2000)
+            }
+        }, "rtcp-keepalive-$localRtpPort").start()
+    }
+
+    private fun sendEmptyRr() {
+        val addr = remoteAddr ?: return
+        val pkt = ByteArray(8)
+        pkt[0] = 0x80.toByte()                 // V=2, RC=0
+        pkt[1] = 201.toByte()                  // PT=RR
+        pkt[2] = 0; pkt[3] = 1                 // length = 1 word after header
+        pkt[4] = (ssrc shr 24).toByte(); pkt[5] = (ssrc shr 16).toByte()
+        pkt[6] = (ssrc shr 8).toByte(); pkt[7] = ssrc.toByte()
+        rtcpSocket.send(DatagramPacket(pkt, pkt.size, addr, remoteRtcpPort))
     }
 
     fun send(payloadType: Int, marker: Boolean, timestamp: Long, payload: ByteArray) {
@@ -69,7 +96,7 @@ class RtpSession(
         pkt[6] = (ssrc shr 8).toByte(); pkt[7] = ssrc.toByte()
         pkt[8] = (remoteSsrc shr 24).toByte(); pkt[9] = (remoteSsrc shr 16).toByte()
         pkt[10] = (remoteSsrc shr 8).toByte(); pkt[11] = remoteSsrc.toByte()
-        runCatching { rtcpSocket.send(DatagramPacket(pkt, pkt.size, addr, remoteRtpPort + 1)) }
+        runCatching { rtcpSocket.send(DatagramPacket(pkt, pkt.size, addr, remoteRtcpPort)) }
     }
 
     private fun receiveLoop(socket: DatagramSocket, rtcp: Boolean) {

@@ -63,25 +63,33 @@ class VideoSender(private val context: Context, private val rtp: RtpSession) {
             else CameraCharacteristics.LENS_FACING_BACK
             val camId = cm.cameraIdList.firstOrNull {
                 cm.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == wantFacing
-            } ?: cm.cameraIdList.firstOrNull() ?: return
+            } ?: cm.cameraIdList.firstOrNull()
+            if (camId == null) { EngineLog.d("VIDEO-TX: no camera on device"); return }
+            EngineLog.d("VIDEO-TX: encoder started, opening camera $camId")
 
             cm.openCamera(camId, object : CameraDevice.StateCallback() {
                 override fun onOpened(dev: CameraDevice) {
+                    EngineLog.d("VIDEO-TX: camera opened")
                     camera = dev
                     dev.createCaptureSession(listOf(inputSurface), object : CameraCaptureSession.StateCallback() {
                         override fun onConfigured(s: CameraCaptureSession) {
+                            EngineLog.d("VIDEO-TX: capture session configured, streaming")
                             session = s
                             val req = dev.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
                             req.addTarget(inputSurface)
                             runCatching { s.setRepeatingRequest(req.build(), null, handler) }
                         }
-                        override fun onConfigureFailed(s: CameraCaptureSession) = stop()
+                        override fun onConfigureFailed(s: CameraCaptureSession) {
+                            EngineLog.d("VIDEO-TX: capture session CONFIGURE FAILED"); stop()
+                        }
                     }, handler)
                 }
-                override fun onDisconnected(dev: CameraDevice) = stop()
-                override fun onError(dev: CameraDevice, error: Int) = stop()
+                override fun onDisconnected(dev: CameraDevice) { EngineLog.d("VIDEO-TX: camera disconnected"); stop() }
+                override fun onError(dev: CameraDevice, error: Int) { EngineLog.d("VIDEO-TX: camera error $error"); stop() }
             }, handler)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            EngineLog.d("VIDEO-TX: start failed ${e.javaClass.simpleName}: ${e.message} " +
+                "(SecurityException here = CAMERA permission not granted)")
             stop()
         }
     }
@@ -99,9 +107,11 @@ class VideoSender(private val context: Context, private val rtp: RtpSession) {
 
             if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
                 configData = data // VPS/SPS/PPS Annex-B
+                EngineLog.d("VIDEO-TX: got codec config (${data.size} B)")
                 continue
             }
             val isKey = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
+            if (timestamp == 0L) EngineLog.d("VIDEO-TX: first frame out (key=$isKey)")
             val au = if (isKey && configData != null) configData!! + data else data
             timestamp += 90_000 / 15
             H265Rtp.packetize(au) { payload, marker ->

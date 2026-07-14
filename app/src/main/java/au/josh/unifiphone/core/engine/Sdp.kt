@@ -18,7 +18,13 @@ data class SdpMedia(
     val port: Int,               // 0 = declined
     val payloadTypes: List<Int>,
     val rtpmap: Map<Int, String>, // pt -> "PCMU/8000" etc
-)
+    /** Explicit a=rtcp: port. Talk handsets use NON-adjacent RTCP ports. */
+    val rtcpPort: Int? = null,
+) {
+    /** Offered payload type whose rtpmap is telephone-event at 8 kHz. */
+    fun dtmfPt8k(): Int? = rtpmap.entries
+        .firstOrNull { it.value.equals("telephone-event/8000", true) }?.key
+}
 
 data class SdpSession(
     val remoteIp: String,
@@ -56,6 +62,8 @@ object Sdp {
          * SDP violation — FreeSWITCH responds by dropping your media).
          */
         audioPayloads: List<Int> = listOf(PT_PCMU, PT_PCMA),
+        /** telephone-event payload type; answers must reuse the OFFER's 8 kHz PT. */
+        dtmfPt: Int = PT_DTMF,
     ): String {
         val sb = StringBuilder()
         sb.append("v=0\r\n")
@@ -63,11 +71,11 @@ object Sdp {
         sb.append("s=Talk\r\n")
         sb.append("c=IN IP4 $localIp\r\n")
         sb.append("t=0 0\r\n")
-        sb.append("m=audio $audioPort RTP/AVP ${audioPayloads.joinToString(" ")} $PT_DTMF\r\n")
+        sb.append("m=audio $audioPort RTP/AVP ${audioPayloads.joinToString(" ")} $dtmfPt\r\n")
         if (PT_PCMU in audioPayloads) sb.append("a=rtpmap:$PT_PCMU PCMU/8000\r\n")
         if (PT_PCMA in audioPayloads) sb.append("a=rtpmap:$PT_PCMA PCMA/8000\r\n")
-        sb.append("a=rtpmap:$PT_DTMF telephone-event/8000\r\n")
-        sb.append("a=fmtp:$PT_DTMF 0-15\r\n")
+        sb.append("a=rtpmap:$dtmfPt telephone-event/8000\r\n")
+        sb.append("a=fmtp:$dtmfPt 0-15\r\n")
         if (videoPort != null) {
             sb.append("m=video $videoPort RTP/AVP $PT_H265\r\n")
             if (videoPort > 0) {
@@ -87,12 +95,13 @@ object Sdp {
         var curPts = listOf<Int>()
         var curMap = mutableMapOf<Int, String>()
         var curIp: String? = null
+        var curRtcp: Int? = null
 
         fun flush() {
             curType?.let {
-                media.add(SdpMedia(it, curPort, curPts, curMap.toMap()))
+                media.add(SdpMedia(it, curPort, curPts, curMap.toMap(), curRtcp))
             }
-            curType = null; curMap = mutableMapOf(); curIp = null
+            curType = null; curMap = mutableMapOf(); curIp = null; curRtcp = null
         }
 
         for (raw in body.split("\n")) {
@@ -110,6 +119,9 @@ object Sdp {
                         curPort = parts[1].toIntOrNull() ?: 0
                         curPts = parts.drop(3).mapNotNull { it.toIntOrNull() }
                     }
+                }
+                line.startsWith("a=rtcp:") -> {
+                    curRtcp = line.removePrefix("a=rtcp:").trim().split(" ").firstOrNull()?.toIntOrNull()
                 }
                 line.startsWith("a=rtpmap:") -> {
                     val rest = line.removePrefix("a=rtpmap:")

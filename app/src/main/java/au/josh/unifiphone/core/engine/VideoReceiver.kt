@@ -51,6 +51,7 @@ class VideoReceiver(private val rtp: RtpSession) {
 
     private fun startCodec() {
         val s = surface ?: return
+        EngineLog.d("VIDEO-RX: starting HEVC decoder")
         runCatching {
             val fmt = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_HEVC, 1280, 720)
             val c = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_HEVC)
@@ -78,8 +79,9 @@ class VideoReceiver(private val rtp: RtpSession) {
                     pts += 33_000
                 }
                 drainOutput(c, info)
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 // Decoder in a bad state: reset and wait for a keyframe.
+                EngineLog.d("VIDEO-RX: decoder error ${e.javaClass.simpleName}, flushing + PLI")
                 runCatching { c.flush() }
                 seenKeyframe = false
                 requestKeyframe()
@@ -97,7 +99,11 @@ class VideoReceiver(private val rtp: RtpSession) {
 
     private fun requestKeyframe() {
         val now = System.currentTimeMillis()
-        if (now - lastPliMs > 500) { lastPliMs = now; rtp.sendPli() }
+        if (now - lastPliMs > 500) {
+            lastPliMs = now
+            EngineLog.d("VIDEO-RX: sending PLI (keyframe request)")
+            rtp.sendPli()
+        }
     }
 
     fun stop() {

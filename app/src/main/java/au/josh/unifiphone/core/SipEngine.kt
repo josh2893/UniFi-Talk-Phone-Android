@@ -4,8 +4,10 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.media.ToneGenerator
 import android.view.Surface
 import au.josh.unifiphone.core.engine.AudioStream
+import au.josh.unifiphone.core.engine.EngineLog
 import au.josh.unifiphone.core.engine.RtpSession
 import au.josh.unifiphone.core.engine.Sdp
 import au.josh.unifiphone.core.engine.SdpSession
@@ -75,6 +77,7 @@ class SipEngine(
     private var pendingRemoteSurface: Surface? = null
 
     private var ringPlayer: MediaPlayer? = null
+    private var ringbackTone: ToneGenerator? = null
     private val audioManager get() = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var savedAlarmVolume: Int? = null
 
@@ -109,6 +112,7 @@ class SipEngine(
             listener = sipListener,
             tracer = ::traceSip,
         )
+        EngineLog.sink = { line -> traceSip("### $line") }
         sip = client
         Thread { client.start() }.start()
     }
@@ -155,8 +159,8 @@ class SipEngine(
         setupMedia(video = withVideo)
 
         val audioOffer = offer.audio()
-        audioOffer?.let { audioRtp?.setRemote(offer.remoteIp, it.port) }
-        remoteVideo?.let { videoRtp?.setRemote(offer.remoteIp, it.port) }
+        audioOffer?.let { audioRtp?.setRemote(offer.remoteIp, it.port, it.rtcpPort) }
+        remoteVideo?.let { videoRtp?.setRemote(offer.remoteIp, it.port, it.rtcpPort) }
 
         // Codec negotiation: the answer must be a SUBSET of the offer.
         // Talk's media path frequently offers PCMA-only (m=audio ... 8 101 13).
@@ -176,6 +180,7 @@ class SipEngine(
             sessionId = Random.nextLong(1000, 99999),
             sessionVersion = Random.nextLong(1000, 99999),
             audioPayloads = listOf(chosenPt),
+            dtmfPt = audioOffer?.dtmfPt8k() ?: Sdp.PT_DTMF,
         )
         client.accept(d, answer)
         startMedia(sendVideo = withVideo)
@@ -267,11 +272,15 @@ class SipEngine(
             }
         }
 
-        override fun onCallRinging(call: SipClient.Dialog) { /* UI already shows outgoing */ }
+        override fun onCallRinging(call: SipClient.Dialog) {
+            // Local ringback: the app doesn't render early media, so give the
+            // caller audible feedback that the far end is ringing.
+            scope.launch { startRingback() }
+        }
 
         override fun onCallAnswered(call: SipClient.Dialog, answer: SdpSession) {
             val audioMedia = answer.audio() ?: run { hangup(); return }
-            audioRtp?.setRemote(answer.remoteIp, audioMedia.port)
+            audioRtp?.setRemote(answer.remoteIp, audioMedia.port, audioMedia.rtcpPort)
             // Send with the codec the far end picked in its answer.
             audio?.txPayloadType = when {
                 Sdp.PT_PCMU in audioMedia.payloadTypes -> Sdp.PT_PCMU
@@ -280,10 +289,11 @@ class SipEngine(
             }
             val videoMedia = answer.video()
             val videoUp = videoMedia != null && videoRtp != null
-            videoMedia?.let { videoRtp?.setRemote(answer.remoteIp, it.port) }
+            videoMedia?.let { videoRtp?.setRemote(answer.remoteIp, it.port, it.rtcpPort) }
             startMedia(sendVideo = videoUp)
             callAnsweredAt = System.currentTimeMillis()
             scope.launch {
+                stopRingback()
                 _callState.value = _callState.value.copy(
                     connected = true, startedAtMs = callAnsweredAt,
                     videoActive = videoUp,
@@ -295,6 +305,7 @@ class SipEngine(
             if (call.callId != dialog?.callId) return
             scope.launch {
                 stopRinging()
+                stopRingback()
                 if (_callState.value.active) recordHistory(_callState.value.remoteNumber)
                 teardownMedia()
                 dialog = null
@@ -394,6 +405,20 @@ class SipEngine(
                 start()
             }
         }
+    }
+
+    private fun startRingback() {
+        if (ringbackTone != null) return
+        runCatching {
+            ringbackTone = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 70).also {
+                it.startTone(ToneGenerator.TONE_SUP_RINGTONE)
+            }
+        }
+    }
+
+    private fun stopRingback() {
+        runCatching { ringbackTone?.stopTone(); ringbackTone?.release() }
+        ringbackTone = null
     }
 
     private fun stopRinging() {
