@@ -6,6 +6,10 @@ import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.params.StreamConfigurationMap
+import android.graphics.SurfaceTexture
+import android.util.Size
+import android.view.Surface
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
@@ -29,6 +33,8 @@ class VideoSender(private val context: Context, private val rtp: RtpSession) {
     private var camera: CameraDevice? = null
     private var session: CameraCaptureSession? = null
     private var cameraThread: HandlerThread? = null
+    private var previewTexture: SurfaceTexture? = null
+    private var previewSurface: Surface? = null
     private var configData: ByteArray? = null
     private var timestamp = 0L // 90 kHz
 
@@ -42,11 +48,31 @@ class VideoSender(private val context: Context, private val rtp: RtpSession) {
     fun start(useFrontCamera: Boolean = true) {
         if (!running.compareAndSet(false, true)) return
         try {
-            val fmt = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_HEVC, 640, 360).apply {
+            cameraThread = HandlerThread("cam").apply { start() }
+            val handler = Handler(cameraThread!!.looper)
+            val cm = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+
+            val wantFacing = if (useFrontCamera) CameraCharacteristics.LENS_FACING_FRONT
+            else CameraCharacteristics.LENS_FACING_BACK
+            val camId = cm.cameraIdList.firstOrNull {
+                cm.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == wantFacing
+            } ?: cm.cameraIdList.firstOrNull()
+            if (camId == null) { EngineLog.d("VIDEO-TX: no camera on device"); stop(); return }
+
+            // Camera2 only accepts output sizes the device actually advertises.
+            // Hardcoding 640x360 is what made createCaptureSession fail.
+            val chars = cm.getCameraCharacteristics(camId)
+            val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            val size = pickSize(map)
+            EngineLog.d("VIDEO-TX: camera $camId, encoding at ${size.width}x${size.height}")
+
+            val fmt = MediaFormat.createVideoFormat(
+                MediaFormat.MIMETYPE_VIDEO_HEVC, size.width, size.height
+            ).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-                setInteger(MediaFormat.KEY_BIT_RATE, 700_000)
+                setInteger(MediaFormat.KEY_BIT_RATE, 800_000)
                 setInteger(MediaFormat.KEY_FRAME_RATE, 15)
-                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
+                setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
                 setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
             }
             val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_HEVC)
@@ -56,28 +82,27 @@ class VideoSender(private val context: Context, private val rtp: RtpSession) {
             codec = enc
             Thread(::drainLoop, "h265-encode").start()
 
-            cameraThread = HandlerThread("cam").apply { start() }
-            val handler = Handler(cameraThread!!.looper)
-            val cm = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-            val wantFacing = if (useFrontCamera) CameraCharacteristics.LENS_FACING_FRONT
-            else CameraCharacteristics.LENS_FACING_BACK
-            val camId = cm.cameraIdList.firstOrNull {
-                cm.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) == wantFacing
-            } ?: cm.cameraIdList.firstOrNull()
-            if (camId == null) { EngineLog.d("VIDEO-TX: no camera on device"); return }
-            EngineLog.d("VIDEO-TX: encoder started, opening camera $camId")
+            // A dummy preview target: some devices reject a capture session whose
+            // only output is an encoder input surface.
+            previewTexture = SurfaceTexture(false).apply {
+                setDefaultBufferSize(size.width, size.height)
+            }
+            previewSurface = Surface(previewTexture)
 
             cm.openCamera(camId, object : CameraDevice.StateCallback() {
                 override fun onOpened(dev: CameraDevice) {
                     EngineLog.d("VIDEO-TX: camera opened")
                     camera = dev
-                    dev.createCaptureSession(listOf(inputSurface), object : CameraCaptureSession.StateCallback() {
+                    val targets = listOfNotNull(inputSurface, previewSurface)
+                    dev.createCaptureSession(targets, object : CameraCaptureSession.StateCallback() {
                         override fun onConfigured(s: CameraCaptureSession) {
                             EngineLog.d("VIDEO-TX: capture session configured, streaming")
                             session = s
                             val req = dev.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
                             req.addTarget(inputSurface)
+                            previewSurface?.let { req.addTarget(it) }
                             runCatching { s.setRepeatingRequest(req.build(), null, handler) }
+                                .onFailure { EngineLog.d("VIDEO-TX: setRepeatingRequest failed: ${it.message}") }
                         }
                         override fun onConfigureFailed(s: CameraCaptureSession) {
                             EngineLog.d("VIDEO-TX: capture session CONFIGURE FAILED"); stop()
@@ -92,6 +117,25 @@ class VideoSender(private val context: Context, private val rtp: RtpSession) {
                 "(SecurityException here = CAMERA permission not granted)")
             stop()
         }
+    }
+
+    /**
+     * Choose a real, advertised output size close to 640x360, preferring 16:9-ish
+     * and capping at 1280x720 so the handset's decoder isn't overwhelmed.
+     */
+    private fun pickSize(map: StreamConfigurationMap?): Size {
+        val sizes = map?.getOutputSizes(MediaCodec::class.java)?.toList()
+            ?: map?.getOutputSizes(android.graphics.ImageFormat.YUV_420_888)?.toList()
+            ?: return Size(640, 480)
+        val usable = sizes.filter { it.width <= 1280 && it.height <= 720 }
+            .ifEmpty { sizes.sortedBy { it.width * it.height }.take(1) }
+        return usable.minByOrNull { s ->
+            val areaDiff = kotlin.math.abs(s.width * s.height - 640 * 360)
+            val ratioDiff = kotlin.math.abs(
+                (s.width.toDouble() / s.height) - (16.0 / 9.0)
+            ) * 200_000
+            areaDiff + ratioDiff.toInt()
+        } ?: Size(640, 480)
     }
 
     private fun drainLoop() {
@@ -125,7 +169,10 @@ class VideoSender(private val context: Context, private val rtp: RtpSession) {
         runCatching { session?.close() }
         runCatching { camera?.close() }
         runCatching { codec?.stop(); codec?.release() }
+        runCatching { previewSurface?.release() }
+        runCatching { previewTexture?.release() }
         runCatching { cameraThread?.quitSafely() }
         session = null; camera = null; codec = null; cameraThread = null
+        previewSurface = null; previewTexture = null
     }
 }

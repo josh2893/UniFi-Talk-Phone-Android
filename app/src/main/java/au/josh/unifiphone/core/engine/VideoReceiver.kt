@@ -67,39 +67,58 @@ class VideoReceiver(private val rtp: RtpSession) {
         val info = MediaCodec.BufferInfo()
         var pts = 0L
         while (running.get()) {
-            val au = queue.poll(100, TimeUnit.MILLISECONDS) ?: run {
-                drainOutput(c, info); null
-            } ?: continue
             try {
-                val inIdx = c.dequeueInputBuffer(20_000)
-                if (inIdx >= 0) {
-                    val buf = c.getInputBuffer(inIdx) ?: continue
-                    buf.clear(); buf.put(au)
-                    c.queueInputBuffer(inIdx, 0, au.size, pts, 0)
-                    pts += 33_000
+                val au = queue.poll(50, TimeUnit.MILLISECONDS)
+                if (au != null) {
+                    val inIdx = c.dequeueInputBuffer(10_000)
+                    if (inIdx >= 0) {
+                        val buf = c.getInputBuffer(inIdx)
+                        if (buf != null) {
+                            buf.clear()
+                            buf.put(au)
+                            c.queueInputBuffer(inIdx, 0, au.size, pts, 0)
+                            pts += 33_000
+                        } else {
+                            c.queueInputBuffer(inIdx, 0, 0, pts, 0)
+                        }
+                    }
+                    // else: no input buffer free right now; drop this AU rather
+                    // than block. Next keyframe resyncs us.
                 }
                 drainOutput(c, info)
+            } catch (e: IllegalStateException) {
+                // Codec went async/error state (bad AU, or flush raced us).
+                EngineLog.d("VIDEO-RX: decoder error IllegalStateException, resetting")
+                if (!resetCodec()) return
             } catch (e: Exception) {
-                // Decoder in a bad state: reset and wait for a keyframe.
-                EngineLog.d("VIDEO-RX: decoder error ${e.javaClass.simpleName}, flushing + PLI")
-                runCatching { c.flush() }
-                seenKeyframe = false
-                requestKeyframe()
+                EngineLog.d("VIDEO-RX: decode loop ${e.javaClass.simpleName}: ${e.message}")
             }
         }
     }
 
-    private fun drainOutput(c: MediaCodec, info: MediaCodec.BufferInfo) {
-        while (true) {
-            val outIdx = try { c.dequeueOutputBuffer(info, 0) } catch (_: Exception) { return }
-            if (outIdx < 0) return
-            c.releaseOutputBuffer(outIdx, true) // render to surface
+    /** Full stop/reconfigure/start; flush() alone doesn't clear an error state. */
+    private fun resetCodec(): Boolean {
+        val s = surface ?: return false
+        queue.clear()
+        seenKeyframe = false
+        return runCatching {
+            codec?.let { old -> runCatching { old.stop() }; runCatching { old.release() } }
+            val fmt = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_HEVC, 1280, 720)
+            val c = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_HEVC)
+            c.configure(fmt, s, null, 0)
+            c.start()
+            codec = c
+            requestKeyframe()
+            true
+        }.getOrElse {
+            EngineLog.d("VIDEO-RX: codec reset failed: ${it.message}")
+            false
         }
     }
 
     private fun requestKeyframe() {
         val now = System.currentTimeMillis()
-        if (now - lastPliMs > 500) {
+        if (now - lastPliMs > 1000) {
             lastPliMs = now
             EngineLog.d("VIDEO-RX: sending PLI (keyframe request)")
             rtp.sendPli()

@@ -2,6 +2,7 @@ package au.josh.unifiphone.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -35,7 +36,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.view.SurfaceHolder
 import android.view.SurfaceView
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
@@ -69,7 +69,7 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(48.dp))
+        Spacer(Modifier.height(if (compact) 8.dp else 48.dp))
         Text(
             text = call.remoteName ?: call.remoteNumber,
             fontSize = 30.sp,
@@ -101,27 +101,33 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
         }
 
         if (call.videoActive && call.connected) {
-            Spacer(Modifier.height(16.dp))
-            AndroidView(
-                factory = { ctx ->
-                    SurfaceView(ctx).apply {
-                        holder.addCallback(object : SurfaceHolder.Callback {
-                            override fun surfaceCreated(h: SurfaceHolder) {
-                                vm.engine.attachRemoteVideoSurface(h.surface)
-                            }
-                            override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, ht: Int) {}
-                            override fun surfaceDestroyed(h: SurfaceHolder) {}
-                        })
-                    }
-                },
-                modifier = Modifier
+            Spacer(Modifier.height(12.dp))
+            // Video takes the remaining space; controls overlay the bottom of it
+            // so nothing is pushed off-screen on a portrait handset.
+            Box(
+                Modifier
                     .fillMaxWidth()
-                    .aspectRatio(9f / 16f)
+                    .weight(1f)
                     .clip(RoundedCornerShape(16.dp)),
-            )
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        SurfaceView(ctx).apply {
+                            holder.addCallback(object : SurfaceHolder.Callback {
+                                override fun surfaceCreated(h: SurfaceHolder) {
+                                    vm.engine.attachRemoteVideoSurface(h.surface)
+                                }
+                                override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, ht: Int) {}
+                                override fun surfaceDestroyed(h: SurfaceHolder) {}
+                            })
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        } else {
+            Spacer(Modifier.weight(1f))
         }
-
-        Spacer(Modifier.weight(1f))
 
         if (call.incoming) {
             Row(horizontalArrangement = Arrangement.spacedBy(64.dp)) {
@@ -166,7 +172,7 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
                 Icon(Icons.Filled.CallEnd, "End call", tint = Color.White)
             }
         }
-        Spacer(Modifier.height(40.dp))
+        Spacer(Modifier.height(if (compact) 12.dp else 40.dp))
     }
 }
 
