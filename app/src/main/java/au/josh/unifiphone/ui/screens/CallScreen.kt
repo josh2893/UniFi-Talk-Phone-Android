@@ -62,11 +62,13 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
         }
     }
 
+    val compact = call.videoActive && call.connected
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(24.dp),
+            .padding(horizontal = 24.dp, vertical = if (compact) 12.dp else 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Spacer(Modifier.height(if (compact) 8.dp else 48.dp))

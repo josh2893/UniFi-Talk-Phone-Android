@@ -116,6 +116,14 @@ class VideoReceiver(private val rtp: RtpSession) {
         }
     }
 
+    private fun drainOutput(c: MediaCodec, info: MediaCodec.BufferInfo) {
+        while (true) {
+            val outIdx = try { c.dequeueOutputBuffer(info, 0) } catch (_: Exception) { return }
+            if (outIdx < 0) return
+            c.releaseOutputBuffer(outIdx, true) // render to surface
+        }
+    }
+
     private fun requestKeyframe() {
         val now = System.currentTimeMillis()
         if (now - lastPliMs > 1000) {
