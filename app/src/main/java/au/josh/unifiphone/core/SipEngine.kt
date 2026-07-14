@@ -154,8 +154,19 @@ class SipEngine(
         val withVideo = remoteVideo != null
         setupMedia(video = withVideo)
 
-        offer.audio()?.let { audioRtp?.setRemote(offer.remoteIp, it.port) }
+        val audioOffer = offer.audio()
+        audioOffer?.let { audioRtp?.setRemote(offer.remoteIp, it.port) }
         remoteVideo?.let { videoRtp?.setRemote(offer.remoteIp, it.port) }
+
+        // Codec negotiation: the answer must be a SUBSET of the offer.
+        // Talk's media path frequently offers PCMA-only (m=audio ... 8 101 13).
+        val chosenPt = when {
+            audioOffer == null -> Sdp.PT_PCMU
+            Sdp.PT_PCMU in audioOffer.payloadTypes -> Sdp.PT_PCMU
+            Sdp.PT_PCMA in audioOffer.payloadTypes -> Sdp.PT_PCMA
+            else -> { decline(); return }
+        }
+        audio?.txPayloadType = chosenPt
 
         val answer = Sdp.build(
             localIp = client.localIp,
@@ -164,6 +175,7 @@ class SipEngine(
             videoPort = if (withVideo) videoRtp!!.localRtpPort else null,
             sessionId = Random.nextLong(1000, 99999),
             sessionVersion = Random.nextLong(1000, 99999),
+            audioPayloads = listOf(chosenPt),
         )
         client.accept(d, answer)
         startMedia(sendVideo = withVideo)
@@ -260,6 +272,12 @@ class SipEngine(
         override fun onCallAnswered(call: SipClient.Dialog, answer: SdpSession) {
             val audioMedia = answer.audio() ?: run { hangup(); return }
             audioRtp?.setRemote(answer.remoteIp, audioMedia.port)
+            // Send with the codec the far end picked in its answer.
+            audio?.txPayloadType = when {
+                Sdp.PT_PCMU in audioMedia.payloadTypes -> Sdp.PT_PCMU
+                Sdp.PT_PCMA in audioMedia.payloadTypes -> Sdp.PT_PCMA
+                else -> Sdp.PT_PCMU
+            }
             val videoMedia = answer.video()
             val videoUp = videoMedia != null && videoRtp != null
             videoMedia?.let { videoRtp?.setRemote(answer.remoteIp, it.port) }

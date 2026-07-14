@@ -24,6 +24,9 @@ class AudioStream(private val rtp: RtpSession) {
     private val running = AtomicBoolean(false)
     @Volatile var muted = false
 
+    /** Negotiated codec for sending: 0 = PCMU, 8 = PCMA. Set from the SDP answer/offer. */
+    @Volatile var txPayloadType = Sdp.PT_PCMU
+
     private var record: AudioRecord? = null
     private var track: AudioTrack? = null
     private var timestamp = 0L
@@ -60,10 +63,13 @@ class AudioStream(private val rtp: RtpSession) {
         Thread(::sendLoop, "audio-tx").start()
     }
 
-    /** Called from RtpSession receive path with a PCMU payload. */
+    /** Called from RtpSession receive path. Accepts PCMU (0) and PCMA (8). */
     fun onRtpAudio(payloadType: Int, payload: ByteArray) {
-        if (payloadType != Sdp.PT_PCMU) return
-        val pcm = G711.decodeMuLaw(payload, 0, payload.size)
+        val pcm = when (payloadType) {
+            Sdp.PT_PCMU -> G711.decodeMuLaw(payload, 0, payload.size)
+            Sdp.PT_PCMA -> G711.decodeALaw(payload, 0, payload.size)
+            else -> return // telephone-event, CN, etc.
+        }
         track?.write(pcm, 0, pcm.size)
     }
 
@@ -99,7 +105,9 @@ class AudioStream(private val rtp: RtpSession) {
                 // Send comfort silence to keep the stream alive.
                 for (i in pcm.indices) pcm[i] = 0
             }
-            rtp.send(Sdp.PT_PCMU, false, timestamp, G711.encodeMuLaw(pcm, 160))
+            val encoded = if (txPayloadType == Sdp.PT_PCMA) G711.encodeALaw(pcm, 160)
+            else G711.encodeMuLaw(pcm, 160)
+            rtp.send(txPayloadType, false, timestamp, encoded)
         }
     }
 

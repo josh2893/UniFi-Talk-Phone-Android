@@ -8,6 +8,7 @@ import java.net.NetworkInterface
 import java.util.Timer
 import java.util.TimerTask
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
@@ -70,7 +71,18 @@ class SipClient(
     private lateinit var socket: DatagramSocket
     private val running = AtomicBoolean(false)
     private var serverAddr: InetAddress? = null
-    val localIp: String get() = detectLocalIp()
+
+    /**
+     * ALL socket sends go through this single thread. Android throws
+     * NetworkOnMainThreadException for sends on the UI thread — dial()/accept()
+     * are invoked from Compose onClick, and a swallowed exception here meant
+     * INVITEs were logged but never transmitted. (Linphone hid this by running
+     * its own core thread.)
+     */
+    private val sendExec = Executors.newSingleThreadExecutor { r -> Thread(r, "sip-send") }
+
+    @Volatile private var cachedLocalIp: String = "127.0.0.1"
+    val localIp: String get() = cachedLocalIp
     var localPort: Int = 0; private set
 
     private val cseq = AtomicLong(Random.nextLong(1, 5000))
@@ -90,6 +102,7 @@ class SipClient(
         if (serverAddr == null) {
             listener.onRegistrationFailed("Cannot resolve $server"); return
         }
+        cachedLocalIp = detectLocalIp()
         Thread(::receiveLoop, "sip-recv").start()
         timer = Timer("sip-timer", true)
         register()
@@ -102,6 +115,7 @@ class SipClient(
         running.set(false)
         timer?.cancel()
         runCatching { socket.close() }
+        sendExec.shutdown()
         dialogs.clear()
     }
 
@@ -428,8 +442,14 @@ class SipClient(
     private fun send(msg: SipMessage) {
         val addr = serverAddr ?: return
         val data = msg.serialize()
-        trace(">>> ", data, data.size)
-        runCatching { socket.send(DatagramPacket(data, data.size, addr, serverPort)) }
+        sendExec.execute {
+            try {
+                socket.send(DatagramPacket(data, data.size, addr, serverPort))
+                trace(">>> ", data, data.size)
+            } catch (e: Exception) {
+                trace("XXX SEND FAILED (${e.javaClass.simpleName}: ${e.message}) ", data, data.size)
+            }
+        }
     }
 
     private fun trace(dir: String, data: ByteArray, len: Int) {

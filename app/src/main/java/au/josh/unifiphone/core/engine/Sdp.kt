@@ -39,6 +39,7 @@ data class SdpSession(
 object Sdp {
 
     const val PT_PCMU = 0
+    const val PT_PCMA = 8
     const val PT_DTMF = 101
     const val PT_H265 = 96
 
@@ -49,6 +50,12 @@ object Sdp {
         videoPort: Int?,          // null = no video m-line; 0 = declined video m-line
         sessionId: Long,
         sessionVersion: Long,
+        /**
+         * Audio codecs for the m-line. Offers list both; ANSWERS must be a
+         * subset of the offer (answering with a codec the offer lacked is an
+         * SDP violation — FreeSWITCH responds by dropping your media).
+         */
+        audioPayloads: List<Int> = listOf(PT_PCMU, PT_PCMA),
     ): String {
         val sb = StringBuilder()
         sb.append("v=0\r\n")
@@ -56,9 +63,9 @@ object Sdp {
         sb.append("s=Talk\r\n")
         sb.append("c=IN IP4 $localIp\r\n")
         sb.append("t=0 0\r\n")
-        sb.append("m=audio $audioPort RTP/AVP $PT_PCMU 8 $PT_DTMF\r\n")
-        sb.append("a=rtpmap:$PT_PCMU PCMU/8000\r\n")
-        sb.append("a=rtpmap:8 PCMA/8000\r\n")
+        sb.append("m=audio $audioPort RTP/AVP ${audioPayloads.joinToString(" ")} $PT_DTMF\r\n")
+        if (PT_PCMU in audioPayloads) sb.append("a=rtpmap:$PT_PCMU PCMU/8000\r\n")
+        if (PT_PCMA in audioPayloads) sb.append("a=rtpmap:$PT_PCMA PCMA/8000\r\n")
         sb.append("a=rtpmap:$PT_DTMF telephone-event/8000\r\n")
         sb.append("a=fmtp:$PT_DTMF 0-15\r\n")
         if (videoPort != null) {

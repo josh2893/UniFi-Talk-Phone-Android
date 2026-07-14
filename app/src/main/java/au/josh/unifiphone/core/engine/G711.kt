@@ -38,4 +38,41 @@ object G711 {
         for (i in 0 until len) out[i] = muLawDecodeTable[data[offset + i].toInt() and 0xFF]
         return out
     }
+
+    // ---- A-law (PCMA, payload type 8) ----
+
+    private val aLawSegEnd = intArrayOf(0x1F, 0x3F, 0x7F, 0xFF, 0x1FF, 0x3FF, 0x7FF, 0xFFF)
+
+    private val aLawDecodeTable = ShortArray(256) { i ->
+        val a = i xor 0x55
+        var t = (a and 0x0F) shl 4
+        when (val seg = (a and 0x70) shr 4) {
+            0 -> t += 8
+            1 -> t += 0x108
+            else -> { t += 0x108; t = t shl (seg - 1) }
+        }
+        (if (a and 0x80 != 0) t else -t).toShort()
+    }
+
+    fun encodeALaw(pcm: ShortArray, len: Int): ByteArray {
+        val out = ByteArray(len)
+        for (i in 0 until len) {
+            var v = pcm[i].toInt() shr 3 // 16-bit -> 13-bit magnitude domain
+            val mask: Int
+            if (v >= 0) mask = 0xD5 else { mask = 0x55; v = -v - 1 }
+            var seg = 8
+            for (s in 0 until 8) if (v <= aLawSegEnd[s]) { seg = s; break }
+            val aval = if (seg >= 8) 0x7F else {
+                (seg shl 4) or (if (seg < 2) (v shr 1) and 0x0F else (v shr seg) and 0x0F)
+            }
+            out[i] = (aval xor mask).toByte()
+        }
+        return out
+    }
+
+    fun decodeALaw(data: ByteArray, offset: Int, len: Int): ShortArray {
+        val out = ShortArray(len)
+        for (i in 0 until len) out[i] = aLawDecodeTable[data[offset + i].toInt() and 0xFF]
+        return out
+    }
 }
