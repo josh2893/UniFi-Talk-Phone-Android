@@ -50,6 +50,8 @@ class SipClient(
         fun onCallRinging(call: Dialog)
         fun onCallAnswered(call: Dialog, answer: SdpSession)
         fun onCallEnded(call: Dialog, reason: String)
+        /** Result of a re-INVITE we sent (e.g. adding video mid-call). */
+        fun onReinviteResult(call: Dialog, success: Boolean, answer: SdpSession?, code: Int) {}
     }
 
     class Dialog(
@@ -66,6 +68,7 @@ class SipClient(
         var answered: Boolean = false,
         var lastResponse: SipMessage? = null,  // resent on INVITE retransmission
         var awaitingAck: Boolean = false,      // 200 OK retransmit until ACK
+        var reinviteInFlight: Boolean = false, // distinguishes re-INVITE responses
     )
 
     private lateinit var socket: DatagramSocket
@@ -177,6 +180,36 @@ class SipClient(
             body = d.localSdp.toByteArray()
         }
         auth?.let { m.add(it.first, it.second) }
+        d.pendingInvite = m
+        send(m)
+    }
+
+    /**
+     * In-dialog re-INVITE — used to add video to a call that was established as
+     * audio-only (e.g. after a ring group answers, since Talk rejects video
+     * INVITEs to groups outright).
+     */
+    fun reinvite(d: Dialog, sdp: String) {
+        if (!d.answered) return
+        d.localSdp = sdp
+        d.reinviteInFlight = true
+        d.localCseq = cseq.incrementAndGet()
+        val m = SipMessage().apply {
+            isRequest = true; method = "INVITE"
+            requestUri = d.remoteTarget
+            add("Via", via())
+            add("Max-Forwards", "70")
+            add("From", "\"$user\" <sip:$user@$domain>;tag=${d.localTag}")
+            add("To", "<${d.remoteTarget}>${d.remoteTag?.let { ";tag=$it" } ?: ""}")
+            add("Call-ID", d.callId)
+            add("CSeq", "${d.localCseq} INVITE")
+            add("Contact", "<sip:$user@$localIp:$localPort;transport=udp>")
+            add("User-Agent", USER_AGENT)
+            add("Allow", ALLOW)
+            for (r in d.routeSet) add("Route", r)
+            add("Content-Type", "application/sdp")
+            body = sdp.toByteArray()
+        }
         d.pendingInvite = m
         send(m)
     }
@@ -301,18 +334,30 @@ class SipClient(
                     sendInvite(d, h to v)
                 }
                 msg.statusCode in 200..299 -> {
+                    val wasReinvite = d.reinviteInFlight
+                    d.reinviteInFlight = false
                     d.remoteTag = msg.tagOf("To")
                     msg.uriOf("Contact")?.let { d.remoteTarget = it }
-                    d.routeSet = msg.headerAll("Record-Route").reversed()
+                    if (!wasReinvite) d.routeSet = msg.headerAll("Record-Route").reversed()
                     d.answered = true
                     ack2xx(d, msg)
                     val sdp = Sdp.parse(String(msg.body))
-                    if (sdp != null) listener.onCallAnswered(d, sdp)
-                    else { bye(d) }
+                    if (wasReinvite) {
+                        listener.onReinviteResult(d, sdp?.video() != null, sdp, msg.statusCode)
+                    } else if (sdp != null) {
+                        listener.onCallAnswered(d, sdp)
+                    } else bye(d)
                 }
                 msg.statusCode >= 300 -> {
                     ackNon2xx(d, msg)
-                    endDialog(d, "${msg.statusCode} ${msg.reason}")
+                    if (d.reinviteInFlight) {
+                        // Re-INVITE rejected: the call itself survives, only the
+                        // media upgrade failed.
+                        d.reinviteInFlight = false
+                        listener.onReinviteResult(d, false, null, msg.statusCode)
+                    } else {
+                        endDialog(d, "${msg.statusCode} ${msg.reason}")
+                    }
                 }
             }
             "BYE", "CANCEL" -> { /* response to our request; nothing to do */ }

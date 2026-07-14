@@ -164,6 +164,25 @@ fun SettingsScreen(vm: PhoneViewModel) {
             )
         }
 
+        SectionCard("Debug / experiments") {
+            ToggleRow(
+                title = "Mid-call video upgrade",
+                subtitle = "Adds an \"Add video\" button to connected audio-only calls. " +
+                    "Sends a re-INVITE offering H.265. Use to test whether a ring " +
+                    "group call can be upgraded to video after it answers.",
+                checked = settings.videoUpgradeDebug,
+                onChange = { vm.updateSettings { s -> s.copy(videoUpgradeDebug = it) } },
+            )
+            Text(
+                "Ring list: enter several extensions separated by commas on the " +
+                    "dial pad (e.g. 10,11,12) to ring them all at once — first to " +
+                    "answer wins. Talk rejects video calls to ring groups, so this " +
+                    "is how a doorbell rings multiple phones with video.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
         SectionCard("Appearance") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ThemeMode.entries.forEach { m ->

@@ -44,6 +44,10 @@ data class CallUiState(
     val startedAtMs: Long = 0L,
     /** True when a video stream is negotiated on this call. */
     val videoActive: Boolean = false,
+    /** Debug: a connected audio-only call that we could try to upgrade to video. */
+    val canUpgradeToVideo: Boolean = false,
+    /** Debug: last re-INVITE outcome, for the Stage-2 experiment. */
+    val upgradeStatus: String? = null,
 )
 
 /**
@@ -68,6 +72,16 @@ class SipEngine(
 
     // Per-call media state
     private var dialog: SipClient.Dialog? = null
+
+    /**
+     * Parallel ring: dialogs currently ringing. No media is set up for these —
+     * during ringing nobody is talking, so we only need N signalling dialogs and
+     * ZERO media sessions. On first answer we CANCEL the losers and build a
+     * single media session for the winner, reusing the normal path.
+     */
+    private val ringingDialogs = mutableListOf<SipClient.Dialog>()
+    private var parallelRingActive = false
+    private var pendingVideoUpgrade = false
     private var audioRtp: RtpSession? = null
     private var videoRtp: RtpSession? = null
     private var audio: AudioStream? = null
@@ -122,8 +136,21 @@ class SipEngine(
     fun dial(rawTarget: String) {
         val s = currentSettings ?: return
         val client = sip ?: return
-        if (rawTarget.isBlank() || dialog != null) return
+        if (rawTarget.isBlank() || dialog != null || parallelRingActive) return
 
+        // A ring list ("10, 11, 12") fans out to several extensions at once.
+        // Talk rejects video INVITEs to ring GROUPS with USER_BUSY, so ringing
+        // individual extensions in parallel is how a doorbell rings the house
+        // and still gets video.
+        val targets = rawTarget.split(',', ';', ' ')
+            .map { it.trim() }.filter { it.isNotEmpty() }
+
+        if (targets.size > 1) {
+            dialParallel(targets, s, client)
+            return
+        }
+
+        val target = targets.firstOrNull() ?: return
         val withVideo = s.videoCalls
         setupMedia(video = withVideo)
         val sdp = Sdp.build(
@@ -136,14 +163,89 @@ class SipEngine(
         )
         callWasIncoming = false
         callAnsweredAt = 0L
-        dialog = client.invite(rawTarget, sdp)
+        dialog = client.invite(target, sdp)
         dialog?.localSdp = sdp
         _callState.value = CallUiState(
             active = true, incoming = false,
-            remoteNumber = rawTarget,
-            remoteName = directory.lookupName(rawTarget),
+            remoteNumber = target,
+            remoteName = directory.lookupName(target),
             videoActive = withVideo,
         )
+    }
+
+    /**
+     * Fan out INVITEs to every extension at once. Each leg gets its OWN SDP with
+     * its own RTP ports (they must be distinct), but no media is started until
+     * one of them answers.
+     */
+    private fun dialParallel(targets: List<String>, s: AppSettings, client: SipClient) {
+        parallelRingActive = true
+        callWasIncoming = false
+        callAnsweredAt = 0L
+        ringingDialogs.clear()
+
+        val withVideo = s.videoCalls
+        for (t in targets) {
+            // Allocate throwaway ports per leg so the SDPs are valid and distinct.
+            val aPort = RtpSession.allocatePortPair()
+            val vPort = if (withVideo) RtpSession.allocatePortPair() else null
+            val sdp = Sdp.build(
+                localIp = client.localIp,
+                user = s.sipUsername,
+                audioPort = aPort,
+                videoPort = vPort,
+                sessionId = Random.nextLong(1000, 99999),
+                sessionVersion = Random.nextLong(1000, 99999),
+            )
+            val d = client.invite(t, sdp)
+            d.localSdp = sdp
+            ringingDialogs.add(d)
+            EngineLog.d("RING: INVITE -> $t (audio $aPort${vPort?.let { ", video $it" } ?: ""})")
+        }
+
+        _callState.value = CallUiState(
+            active = true, incoming = false,
+            remoteNumber = targets.joinToString(", "),
+            remoteName = "Ringing ${targets.size} phones",
+            videoActive = withVideo,
+        )
+    }
+
+    /** Try to add video to a connected audio-only call (debug / Stage-2 tool). */
+    fun upgradeToVideo() {
+        val d = dialog ?: return
+        val s = currentSettings ?: return
+        val client = sip ?: return
+        if (_callState.value.videoActive || !_callState.value.connected) return
+
+        // Build a fresh offer that keeps the negotiated audio port and adds video.
+        val aPort = audioRtp?.localRtpPort ?: return
+        if (videoRtp == null) {
+            val vPort = RtpSession.allocatePortPair()
+            videoRtp = RtpSession(
+                vPort,
+                onPacket = { pt, marker, seq, _, payload ->
+                    if (pt == Sdp.PT_H265) videoRx?.onRtpVideo(seq, marker, payload)
+                },
+                onKeyframeRequest = { videoTx?.requestKeyframe() },
+            )
+            videoRx = VideoReceiver(videoRtp!!)
+            videoTx = VideoSender(context, videoRtp!!)
+            pendingRemoteSurface?.let { videoRx?.attachSurface(it) }
+        }
+        val sdp = Sdp.build(
+            localIp = client.localIp,
+            user = s.sipUsername,
+            audioPort = aPort,
+            videoPort = videoRtp!!.localRtpPort,
+            sessionId = Random.nextLong(1000, 99999),
+            sessionVersion = Random.nextLong(1000, 99999),
+            audioPayloads = listOf(audio?.txPayloadType ?: Sdp.PT_PCMU),
+        )
+        pendingVideoUpgrade = true
+        _callState.value = _callState.value.copy(upgradeStatus = "Sending re-INVITE…")
+        EngineLog.d("UPGRADE: sending re-INVITE with H.265 video m-line")
+        client.reinvite(d, sdp)
     }
 
     fun accept() {
@@ -272,6 +374,34 @@ class SipEngine(
             }
         }
 
+        override fun onReinviteResult(
+            call: SipClient.Dialog, success: Boolean, answer: SdpSession?, code: Int,
+        ) {
+            pendingVideoUpgrade = false
+            val videoMedia = answer?.video()
+            if (success && videoMedia != null && answer != null) {
+                EngineLog.d("UPGRADE: accepted — video on port ${videoMedia.port}")
+                videoRtp?.setRemote(answer.remoteIp, videoMedia.port, videoMedia.rtcpPort)
+                videoRtp?.start()
+                videoRx?.start()
+                videoTx?.start()
+                scope.launch {
+                    _callState.value = _callState.value.copy(
+                        videoActive = true,
+                        canUpgradeToVideo = false,
+                        upgradeStatus = "Video added (port ${videoMedia.port})",
+                    )
+                }
+            } else {
+                val why = if (code >= 300) "rejected with $code"
+                else "answered with m=video 0 (peer declined video)"
+                EngineLog.d("UPGRADE: $why")
+                scope.launch {
+                    _callState.value = _callState.value.copy(upgradeStatus = "Failed: $why")
+                }
+            }
+        }
+
         override fun onCallRinging(call: SipClient.Dialog) {
             // Local ringback: the app doesn't render early media, so give the
             // caller audible feedback that the far end is ringing.
@@ -279,6 +409,32 @@ class SipEngine(
         }
 
         override fun onCallAnswered(call: SipClient.Dialog, answer: SdpSession) {
+            if (parallelRingActive) {
+                // First answer wins. CANCEL every other ringing leg, then build
+                // media for the winner only.
+                parallelRingActive = false
+                val losers = ringingDialogs.filter { it.callId != call.callId }
+                ringingDialogs.clear()
+                for (l in losers) {
+                    EngineLog.d("RING: cancelling loser leg ${l.callId}")
+                    runCatching { sip?.cancel(l) }
+                }
+                dialog = call
+                val s = currentSettings
+                val chosenPt = when {
+                    Sdp.PT_PCMU in (answer.audio()?.payloadTypes ?: emptyList()) -> Sdp.PT_PCMU
+                    else -> Sdp.PT_PCMA
+                }
+                setupMedia(video = answer.video() != null && s?.videoCalls == true)
+                audio?.txPayloadType = chosenPt
+                scope.launch {
+                    _callState.value = _callState.value.copy(
+                        remoteNumber = call.remoteTarget
+                            .substringAfter("sip:").substringBefore("@"),
+                        remoteName = null,
+                    )
+                }
+            }
             val audioMedia = answer.audio() ?: run { hangup(); return }
             audioRtp?.setRemote(answer.remoteIp, audioMedia.port, audioMedia.rtcpPort)
             // Send with the codec the far end picked in its answer.
@@ -297,15 +453,30 @@ class SipEngine(
                 _callState.value = _callState.value.copy(
                     connected = true, startedAtMs = callAnsweredAt,
                     videoActive = videoUp,
+                    canUpgradeToVideo = !videoUp && currentSettings?.videoUpgradeDebug == true,
                 )
             }
         }
 
         override fun onCallEnded(call: SipClient.Dialog, reason: String) {
+            // A losing/declined leg of a parallel ring: ignore unless it was the
+            // last one still ringing.
+            if (parallelRingActive && call.callId != dialog?.callId) {
+                ringingDialogs.removeAll { it.callId == call.callId }
+                EngineLog.d("RING: leg ended ($reason), ${ringingDialogs.size} still ringing")
+                if (ringingDialogs.isNotEmpty()) return
+                parallelRingActive = false
+                scope.launch {
+                    stopRingback()
+                    _callState.value = CallUiState()
+                }
+                return
+            }
             if (call.callId != dialog?.callId) return
             scope.launch {
                 stopRinging()
                 stopRingback()
+                clearRingState()
                 if (_callState.value.active) recordHistory(_callState.value.remoteNumber)
                 teardownMedia()
                 dialog = null
@@ -348,6 +519,12 @@ class SipEngine(
             videoRx?.start()
             if (sendVideo) videoTx?.start()
         }
+    }
+
+    private fun clearRingState() {
+        parallelRingActive = false
+        ringingDialogs.clear()
+        pendingVideoUpgrade = false
     }
 
     private fun teardownMedia() {

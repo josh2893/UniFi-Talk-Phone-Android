@@ -41,6 +41,13 @@ data class AppSettings(
     // H.265 video calls. When OFF, outgoing calls are audio-only but the
     // phone still ACCEPTS incoming video calls.
     val videoCalls: Boolean = false,
+
+    // DEBUG: show an "Add video" button on connected audio-only calls, which
+    // sends a re-INVITE with an H.265 m-line. Experiment: Talk rejects video
+    // INVITEs to ring groups outright, but a group call that answered as audio
+    // MIGHT accept a mid-call video upgrade (bypass_media makes the media path
+    // peer-to-peer once bridged). Off by default.
+    val videoUpgradeDebug: Boolean = false,
 )
 
 class SettingsRepository(private val context: Context) {
@@ -58,6 +65,7 @@ class SettingsRepository(private val context: Context) {
         val KIOSK = booleanPreferencesKey("kiosk_enabled")
         val RINGTONE = stringPreferencesKey("ringtone")
         val VIDEO_CALLS = booleanPreferencesKey("video_calls")
+        val VIDEO_UPGRADE_DEBUG = booleanPreferencesKey("video_upgrade_debug")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -76,6 +84,7 @@ class SettingsRepository(private val context: Context) {
             kioskEnabled = p[Keys.KIOSK] ?: false,
             ringtone = p[Keys.RINGTONE] ?: "raw:ringtone_classic",
             videoCalls = p[Keys.VIDEO_CALLS] ?: false,
+            videoUpgradeDebug = p[Keys.VIDEO_UPGRADE_DEBUG] ?: false,
         )
     }
 
@@ -96,6 +105,7 @@ class SettingsRepository(private val context: Context) {
             p[Keys.KIOSK] = next.kioskEnabled
             p[Keys.RINGTONE] = next.ringtone
             p[Keys.VIDEO_CALLS] = next.videoCalls
+            p[Keys.VIDEO_UPGRADE_DEBUG] = next.videoUpgradeDebug
         }
     }
 }

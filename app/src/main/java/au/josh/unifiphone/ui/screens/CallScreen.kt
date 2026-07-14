@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -153,6 +154,24 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
             if (showDtmf) {
                 Keypad(compact = true, onKey = { vm.engine.sendDtmf(it) })
                 Spacer(Modifier.height(20.dp))
+            }
+            if (call.canUpgradeToVideo) {
+                RoundActionButton(
+                    background = MaterialTheme.colorScheme.primary,
+                    onClick = { vm.engine.upgradeToVideo() },
+                    size = 56,
+                ) {
+                    Icon(Icons.Filled.Videocam, "Add video", tint = Color.White)
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+            call.upgradeStatus?.let { status ->
+                Text(
+                    status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                 ToggleCallButton(
