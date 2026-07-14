@@ -30,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -37,8 +38,6 @@ import androidx.compose.ui.unit.sp
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.viewinterop.AndroidView
@@ -62,16 +61,52 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
         }
     }
 
-    val compact = call.videoActive && call.connected
+    val videoOn = call.videoActive && call.connected
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+    ) {
+        // Video is a full-bleed BACKGROUND layer. Controls float on top of it,
+        // so opening the keypad never squashes or displaces the picture.
+        if (videoOn) {
+            AndroidView(
+                factory = { ctx ->
+                    SurfaceView(ctx).apply {
+                        holder.addCallback(object : SurfaceHolder.Callback {
+                            override fun surfaceCreated(h: SurfaceHolder) {
+                                vm.engine.attachRemoteVideoSurface(h.surface)
+                            }
+                            override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, ht: Int) {}
+                            override fun surfaceDestroyed(h: SurfaceHolder) {}
+                        })
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+            // Scrim so white text/buttons stay legible over bright video.
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Black.copy(alpha = 0.45f),
+                            0.25f to Color.Transparent,
+                            0.60f to Color.Transparent,
+                            1f to Color.Black.copy(alpha = 0.70f),
+                        )
+                    )
+            )
+        }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 24.dp, vertical = if (compact) 12.dp else 24.dp),
+            .padding(horizontal = 24.dp, vertical = if (videoOn) 12.dp else 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Spacer(Modifier.height(if (compact) 8.dp else 48.dp))
+        Spacer(Modifier.height(if (videoOn) 8.dp else 48.dp))
         Text(
             text = call.remoteName ?: call.remoteNumber,
             fontSize = 30.sp,
@@ -102,34 +137,8 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
             onDispose { view.keepScreenOn = false }
         }
 
-        if (call.videoActive && call.connected) {
-            Spacer(Modifier.height(12.dp))
-            // Video takes the remaining space; controls overlay the bottom of it
-            // so nothing is pushed off-screen on a portrait handset.
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .clip(RoundedCornerShape(16.dp)),
-            ) {
-                AndroidView(
-                    factory = { ctx ->
-                        SurfaceView(ctx).apply {
-                            holder.addCallback(object : SurfaceHolder.Callback {
-                                override fun surfaceCreated(h: SurfaceHolder) {
-                                    vm.engine.attachRemoteVideoSurface(h.surface)
-                                }
-                                override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, ht: Int) {}
-                                override fun surfaceDestroyed(h: SurfaceHolder) {}
-                            })
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        } else {
-            Spacer(Modifier.weight(1f))
-        }
+        // Push controls to the bottom; video (if any) shows through behind.
+        Spacer(Modifier.weight(1f))
 
         if (call.incoming) {
             Row(horizontalArrangement = Arrangement.spacedBy(64.dp)) {
@@ -174,7 +183,8 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
                 Icon(Icons.Filled.CallEnd, "End call", tint = Color.White)
             }
         }
-        Spacer(Modifier.height(if (compact) 12.dp else 40.dp))
+        Spacer(Modifier.height(if (videoOn) 16.dp else 40.dp))
+    }
     }
 }
 

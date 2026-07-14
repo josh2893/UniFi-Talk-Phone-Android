@@ -35,6 +35,7 @@ class VideoSender(private val context: Context, private val rtp: RtpSession) {
     private var cameraThread: HandlerThread? = null
     private var previewTexture: SurfaceTexture? = null
     private var previewSurface: Surface? = null
+    private var glBridge: GlRotationBridge? = null
     private var configData: ByteArray? = null
     private var timestamp = 0L // 90 kHz
 
@@ -60,14 +61,28 @@ class VideoSender(private val context: Context, private val rtp: RtpSession) {
             if (camId == null) { EngineLog.d("VIDEO-TX: no camera on device"); stop(); return }
 
             // Camera2 only accepts output sizes the device actually advertises.
-            // Hardcoding 640x360 is what made createCaptureSession fail.
             val chars = cm.getCameraCharacteristics(camId)
             val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-            val size = pickSize(map)
-            EngineLog.d("VIDEO-TX: camera $camId, encoding at ${size.width}x${size.height}")
+            val camSize = pickSize(map)
+
+            // The sensor is mounted landscape; the handset expects upright portrait.
+            // SENSOR_ORIENTATION is the clockwise rotation needed to make the sensor
+            // image upright for a device held in its natural (portrait) orientation.
+            val sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+            val facing = chars.get(CameraCharacteristics.LENS_FACING)
+            val isFront = facing == CameraCharacteristics.LENS_FACING_FRONT
+            val rotation = ((sensorOrientation % 360) + 360) % 360
+            // Rotating 90/270 swaps the encoded frame dimensions.
+            val encW = if (rotation % 180 == 0) camSize.width else camSize.height
+            val encH = if (rotation % 180 == 0) camSize.height else camSize.width
+
+            EngineLog.d(
+                "VIDEO-TX: camera $camId ${camSize.width}x${camSize.height} " +
+                    "sensorOrientation=$sensorOrientation front=$isFront -> encoding ${encW}x${encH}"
+            )
 
             val fmt = MediaFormat.createVideoFormat(
-                MediaFormat.MIMETYPE_VIDEO_HEVC, size.width, size.height
+                MediaFormat.MIMETYPE_VIDEO_HEVC, encW, encH
             ).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
                 setInteger(MediaFormat.KEY_BIT_RATE, 800_000)
@@ -77,41 +92,50 @@ class VideoSender(private val context: Context, private val rtp: RtpSession) {
             }
             val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_HEVC)
             enc.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            val inputSurface = enc.createInputSurface()
+            val encoderSurface = enc.createInputSurface()
             enc.start()
             codec = enc
             Thread(::drainLoop, "h265-encode").start()
 
-            // A dummy preview target: some devices reject a capture session whose
-            // only output is an encoder input surface.
-            previewTexture = SurfaceTexture(false).apply {
-                setDefaultBufferSize(size.width, size.height)
-            }
-            previewSurface = Surface(previewTexture)
+            // Camera renders into the GL bridge, which rotates each frame and
+            // draws it into the encoder surface. Encoding the camera surface
+            // directly is what produced the sideways image on the handset.
+            val bridge = GlRotationBridge(
+                encoderSurface = encoderSurface,
+                outWidth = encW,
+                outHeight = encH,
+                rotationDegrees = rotation,
+                mirror = isFront,
+            )
+            glBridge = bridge
 
-            cm.openCamera(camId, object : CameraDevice.StateCallback() {
-                override fun onOpened(dev: CameraDevice) {
-                    EngineLog.d("VIDEO-TX: camera opened")
-                    camera = dev
-                    val targets = listOfNotNull(inputSurface, previewSurface)
-                    dev.createCaptureSession(targets, object : CameraCaptureSession.StateCallback() {
-                        override fun onConfigured(s: CameraCaptureSession) {
-                            EngineLog.d("VIDEO-TX: capture session configured, streaming")
-                            session = s
-                            val req = dev.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
-                            req.addTarget(inputSurface)
-                            previewSurface?.let { req.addTarget(it) }
-                            runCatching { s.setRepeatingRequest(req.build(), null, handler) }
-                                .onFailure { EngineLog.d("VIDEO-TX: setRepeatingRequest failed: ${it.message}") }
-                        }
-                        override fun onConfigureFailed(s: CameraCaptureSession) {
-                            EngineLog.d("VIDEO-TX: capture session CONFIGURE FAILED"); stop()
-                        }
-                    }, handler)
-                }
-                override fun onDisconnected(dev: CameraDevice) { EngineLog.d("VIDEO-TX: camera disconnected"); stop() }
-                override fun onError(dev: CameraDevice, error: Int) { EngineLog.d("VIDEO-TX: camera error $error"); stop() }
-            }, handler)
+            bridge.start { camTarget ->
+                cm.openCamera(camId, object : CameraDevice.StateCallback() {
+                    override fun onOpened(dev: CameraDevice) {
+                        EngineLog.d("VIDEO-TX: camera opened")
+                        camera = dev
+                        dev.createCaptureSession(
+                            listOf(camTarget),
+                            object : CameraCaptureSession.StateCallback() {
+                                override fun onConfigured(s: CameraCaptureSession) {
+                                    EngineLog.d("VIDEO-TX: capture session configured, streaming")
+                                    session = s
+                                    val req = dev.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
+                                    req.addTarget(camTarget)
+                                    runCatching { s.setRepeatingRequest(req.build(), null, handler) }
+                                        .onFailure { EngineLog.d("VIDEO-TX: setRepeatingRequest failed: ${it.message}") }
+                                }
+                                override fun onConfigureFailed(s: CameraCaptureSession) {
+                                    EngineLog.d("VIDEO-TX: capture session CONFIGURE FAILED"); stop()
+                                }
+                            },
+                            handler,
+                        )
+                    }
+                    override fun onDisconnected(dev: CameraDevice) { EngineLog.d("VIDEO-TX: camera disconnected"); stop() }
+                    override fun onError(dev: CameraDevice, error: Int) { EngineLog.d("VIDEO-TX: camera error $error"); stop() }
+                }, handler)
+            }
         } catch (e: Exception) {
             EngineLog.d("VIDEO-TX: start failed ${e.javaClass.simpleName}: ${e.message} " +
                 "(SecurityException here = CAMERA permission not granted)")
@@ -169,6 +193,8 @@ class VideoSender(private val context: Context, private val rtp: RtpSession) {
         runCatching { session?.close() }
         runCatching { camera?.close() }
         runCatching { codec?.stop(); codec?.release() }
+        runCatching { glBridge?.release() }
+        glBridge = null
         runCatching { previewSurface?.release() }
         runCatching { previewTexture?.release() }
         runCatching { cameraThread?.quitSafely() }
