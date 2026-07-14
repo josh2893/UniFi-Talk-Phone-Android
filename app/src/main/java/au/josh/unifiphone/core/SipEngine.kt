@@ -103,6 +103,7 @@ class SipEngine(
         val client = SipClient(
             server = s.sipServer,
             serverPort = s.sipPort.toIntOrNull() ?: 5060,
+            domain = s.sipDomain.ifBlank { "talk.com" },
             user = s.sipUsername,
             password = s.sipPassword,
             listener = sipListener,

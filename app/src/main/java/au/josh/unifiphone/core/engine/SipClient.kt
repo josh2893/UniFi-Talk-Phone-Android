@@ -26,10 +26,18 @@ import kotlin.random.Random
  *    INFO (200), BYE (200 + teardown)
  */
 class SipClient(
+    /** Transport target: the console's IP/hostname, where packets are sent. */
     private val server: String,
     private val serverPort: Int,
     private val user: String,
     private val password: String,
+    /**
+     * SIP domain used inside URIs (From/To/Request-URI). On UniFi Talk this is
+     * `talk.com`, NOT the console IP — sofia matches the domain to route calls,
+     * and an IP in the Request-URI is silently dropped (REGISTER still works,
+     * which is why registration succeeds but INVITEs vanish).
+     */
+    private val domain: String,
     private val listener: Listener,
     /** Optional wire trace: every SIP message in/out, for sip_debug.log. */
     private val tracer: ((String) -> Unit)? = null,
@@ -104,11 +112,11 @@ class SipClient(
     private fun register() {
         val m = SipMessage().apply {
             isRequest = true; method = "REGISTER"
-            requestUri = "sip:$server"
+            requestUri = "sip:$domain"
             add("Via", via())
             add("Max-Forwards", "70")
-            add("From", "<sip:$user@$server>;tag=${newToken(8)}")
-            add("To", "<sip:$user@$server>")
+            add("From", "<sip:$user@$domain>;tag=${newToken(8)}")
+            add("To", "<sip:$user@$domain>")
             add("Call-ID", regCallId)
             add("CSeq", "${regCseq.incrementAndGet()} REGISTER")
             add("Contact", "<sip:$user@$localIp:$localPort;transport=udp>")
@@ -117,7 +125,7 @@ class SipClient(
             add("Allow", ALLOW)
         }
         regChallenge?.let {
-            val (h, v) = DigestAuth.authorizationHeader(it, user, password, "REGISTER", "sip:$server", ++regAuthNc)
+            val (h, v) = DigestAuth.authorizationHeader(it, user, password, "REGISTER", "sip:$domain", ++regAuthNc)
             m.add(h, v)
         }
         send(m)
@@ -130,7 +138,7 @@ class SipClient(
         val callId = newToken(16)
         val d = Dialog(
             callId = callId, localTag = newToken(8),
-            remoteTarget = "sip:$target@$server", outgoing = true, localSdp = sdp,
+            remoteTarget = "sip:$target@$domain", outgoing = true, localSdp = sdp,
         )
         dialogs[callId] = d
         sendInvite(d, auth = null)
@@ -144,7 +152,7 @@ class SipClient(
             requestUri = d.remoteTarget
             add("Via", via())
             add("Max-Forwards", "70")
-            add("From", "\"$user\" <sip:$user@$server>;tag=${d.localTag}")
+            add("From", "\"$user\" <sip:$user@$domain>;tag=${d.localTag}")
             add("To", "<${d.remoteTarget}>")
             add("Call-ID", d.callId)
             add("CSeq", "${d.localCseq} INVITE")
@@ -183,7 +191,7 @@ class SipClient(
             requestUri = d.remoteTarget
             add("Via", via())
             add("Max-Forwards", "70")
-            add("From", "<sip:$user@$server>;tag=${d.localTag}")
+            add("From", "<sip:$user@$domain>;tag=${d.localTag}")
             add("To", "<sip:${d.remoteTarget.removePrefix("sip:")}>${d.remoteTag?.let { ";tag=$it" } ?: ""}")
             add("Call-ID", d.callId)
             add("CSeq", "${d.localCseq} BYE")
@@ -376,7 +384,7 @@ class SipClient(
             requestUri = d.remoteTarget
             add("Via", via())
             add("Max-Forwards", "70")
-            add("From", "\"$user\" <sip:$user@$server>;tag=${d.localTag}")
+            add("From", "\"$user\" <sip:$user@$domain>;tag=${d.localTag}")
             add("To", resp2xx.header("To")!!)
             add("Call-ID", d.callId)
             add("CSeq", "${resp2xx.cseqNumber()} ACK")

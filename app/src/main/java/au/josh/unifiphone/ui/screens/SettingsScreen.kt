@@ -53,6 +53,7 @@ fun SettingsScreen(vm: PhoneViewModel) {
     // Local editable copies of SIP fields; saved on "Save & register"
     var server by remember(settings.sipServer) { mutableStateOf(settings.sipServer) }
     var port by remember(settings.sipPort) { mutableStateOf(settings.sipPort) }
+    var domain by remember(settings.sipDomain) { mutableStateOf(settings.sipDomain) }
     var user by remember(settings.sipUsername) { mutableStateOf(settings.sipUsername) }
     var pass by remember(settings.sipPassword) { mutableStateOf(settings.sipPassword) }
 
@@ -109,6 +110,12 @@ fun SettingsScreen(vm: PhoneViewModel) {
                 label = { Text("Port") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
+                value = domain, onValueChange = { domain = it },
+                label = { Text("SIP domain") },
+                supportingText = { Text("UniFi Talk uses talk.com — not the console IP") },
+                singleLine = true, modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
                 value = user, onValueChange = { user = it },
                 label = { Text("Username / extension") },
                 singleLine = true, modifier = Modifier.fillMaxWidth(),
@@ -133,6 +140,7 @@ fun SettingsScreen(vm: PhoneViewModel) {
                 vm.updateSettings {
                     it.copy(
                         sipServer = server.trim(), sipPort = port.trim().ifBlank { "5060" },
+                        sipDomain = domain.trim().ifBlank { "talk.com" },
                         sipUsername = user.trim(), sipPassword = pass,
                         phoneLabel = label.trim(),
                     )

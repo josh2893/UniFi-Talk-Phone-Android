@@ -16,8 +16,12 @@ enum class Transport { UDP, TCP, TLS }
 
 data class AppSettings(
     // SIP account (create a third-party SIP device in UniFi Talk to obtain these)
-    val sipServer: String = "",          // Talk console IP or hostname
+    val sipServer: String = "",          // Talk console IP or hostname (transport target)
     val sipPort: String = "5060",
+    // SIP domain used inside From/To/Request-URI. UniFi Talk uses "talk.com".
+    // This is NOT the console IP — sofia routes on the domain, and an IP here
+    // means INVITEs are silently dropped even though REGISTER succeeds.
+    val sipDomain: String = "talk.com",
     val sipUsername: String = "",        // extension / auth user from Talk
     val sipPassword: String = "",
     val transport: Transport = Transport.UDP,
@@ -44,6 +48,7 @@ class SettingsRepository(private val context: Context) {
     private object Keys {
         val SERVER = stringPreferencesKey("sip_server")
         val PORT = stringPreferencesKey("sip_port")
+        val DOMAIN = stringPreferencesKey("sip_domain")
         val USER = stringPreferencesKey("sip_user")
         val PASS = stringPreferencesKey("sip_pass")
         val TRANSPORT = stringPreferencesKey("sip_transport")
@@ -59,6 +64,7 @@ class SettingsRepository(private val context: Context) {
         AppSettings(
             sipServer = p[Keys.SERVER] ?: "",
             sipPort = p[Keys.PORT] ?: "5060",
+            sipDomain = p[Keys.DOMAIN]?.takeIf { it.isNotBlank() } ?: "talk.com",
             sipUsername = p[Keys.USER] ?: "",
             sipPassword = p[Keys.PASS] ?: "",
             transport = runCatching { Transport.valueOf(p[Keys.TRANSPORT] ?: "UDP") }
@@ -80,6 +86,7 @@ class SettingsRepository(private val context: Context) {
         context.dataStore.edit { p ->
             p[Keys.SERVER] = next.sipServer
             p[Keys.PORT] = next.sipPort
+            p[Keys.DOMAIN] = next.sipDomain
             p[Keys.USER] = next.sipUsername
             p[Keys.PASS] = next.sipPassword
             p[Keys.TRANSPORT] = next.transport.name
