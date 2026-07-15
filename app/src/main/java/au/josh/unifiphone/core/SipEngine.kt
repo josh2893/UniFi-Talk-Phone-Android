@@ -112,6 +112,7 @@ class SipEngine(
     fun start() { /* stack starts on applySettings */ }
 
     fun applySettings(s: AppSettings) {
+        traceSip("### BUILD: v3.5 aspect-fix (encode matches capture aspect)")
         currentSettings = s
         sip?.stop(); sip = null
         if (s.sipServer.isBlank() || s.sipUsername.isBlank()) {

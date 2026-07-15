@@ -209,21 +209,26 @@ class VideoSender(
     private fun pickEncodeSize(capture: Size): Size {
         val shortEdge = if (tuning.resolutionShortEdge > 0) tuning.resolutionShortEdge else 480
         fun even(v: Int) = maxOf(2, (v / 2) * 2)
-        // Portrait width:height (Wp < Hp).
+
+        if (tuning.targetAspect == "source") {
+            // Encoder aspect == camera aspect EXACTLY -> no GL aspect correction,
+            // no stretch. Scale the landscape capture so its short edge = target.
+            val longE = maxOf(capture.width, capture.height).toDouble()
+            val shortE = minOf(capture.width, capture.height).toDouble()
+            val longScaled = (shortEdge * longE / shortE).toInt()
+            // Return as landscape (long x short); rotation swap handles portrait.
+            return Size(even(longScaled), even(shortEdge))
+        }
+
+        // Fixed target aspect (portrait Wp:Hp).
         val (wp, hp) = when (tuning.targetAspect) {
             "9:16" -> 9.0 to 16.0
             "3:4" -> 3.0 to 4.0
             "1:1" -> 1.0 to 1.0
-            else -> {
-                // "source": camera is landscape L x S; rotated to portrait it's S x L.
-                val s0 = minOf(capture.width, capture.height).toDouble()
-                val l0 = maxOf(capture.width, capture.height).toDouble()
-                s0 to l0
-            }
+            else -> 3.0 to 4.0
         }
         val portraitW = shortEdge
         val portraitH = (shortEdge * hp / wp).toInt()
-        // Pre-rotation landscape frame = portraitH x portraitW.
         return Size(even(portraitH), even(portraitW))
     }
 

@@ -527,7 +527,7 @@ class SipClient(
     }
 
     companion object {
-        private const val USER_AGENT = "UniFiPhone-Android/2.0"
+        private const val USER_AGENT = "UniFiPhone-Android/3.5"
         private const val ALLOW = "INVITE, ACK, CANCEL, BYE, OPTIONS, INFO, UPDATE, NOTIFY"
         private fun newToken(len: Int): String {
             val chars = "abcdefghijklmnopqrstuvwxyz0123456789"

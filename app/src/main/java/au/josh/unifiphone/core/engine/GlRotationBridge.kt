@@ -81,7 +81,13 @@ class GlRotationBridge(
                     setOnFrameAvailableListener({ handler?.post { drawFrame() } }, handler)
                 }
                 cameraSurface = Surface(cameraTexture)
-                EngineLog.d("VIDEO-TX: GL bridge ready (rot=$rotationDegrees mirror=$mirror)")
+                EngineLog.d(
+                    "VIDEO-TX: GL bridge src=${srcWidth}x${srcHeight} " +
+                        "out=${outWidth}x${outHeight} rot=$rotationDegrees " +
+                        "mirror=$mirror fill=$scaleFill " +
+                        "srcAspect=${"%.3f".format(srcWidth.toFloat()/srcHeight)} " +
+                        "outAspect=${"%.3f".format(outWidth.toFloat()/outHeight)}"
+                )
                 onReady(cameraSurface!!)
             } catch (e: Exception) {
                 EngineLog.d("VIDEO-TX: GL bridge failed: ${e.javaClass.simpleName}: ${e.message}")
