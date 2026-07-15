@@ -110,8 +110,8 @@ data class AppSettings(
     // "fit" = letterbox (whole frame, bars), "fill" = center-crop (fills, trims).
     val videoScaleMode: String = "fill",
     // Target aspect of the ENCODED frame: "source" (camera), "9:16", "3:4", "1:1".
-    // Cropping the 4:3 sensor to a portrait aspect stops the handset stretching it.
-    val videoTargetAspect: String = "source",
+    // UTP-Touch renders video in a portrait viewport, so default to portrait.
+    val videoTargetAspect: String = "9:16",
     // Show a live stats overlay (packet/frame counters) during calls.
     val showDebugOverlay: Boolean = false,
 )
@@ -159,13 +159,13 @@ class SettingsRepository(private val context: Context) {
             ringtone = p[Keys.RINGTONE] ?: "raw:ringtone_classic",
             videoCalls = p[Keys.VIDEO_CALLS] ?: false,
             videoUpgradeDebug = p[Keys.VIDEO_UPGRADE_DEBUG] ?: false,
-            videoRotationOffset = p[Keys.VIDEO_ROTATION] ?: 0,
+            videoRotationOffset = p[Keys.VIDEO_ROTATION] ?: 270,
             videoMirror = p[Keys.VIDEO_MIRROR] ?: false,
             videoUseFrontCamera = p[Keys.VIDEO_FRONT] ?: true,
             videoResolution = p[Keys.VIDEO_RES] ?: 0,
             videoBitrateKbps = p[Keys.VIDEO_BITRATE] ?: 800,
             videoScaleMode = p[Keys.VIDEO_SCALE] ?: "fill",
-            videoTargetAspect = p[Keys.VIDEO_ASPECT] ?: "source",
+            videoTargetAspect = p[Keys.VIDEO_ASPECT] ?: "9:16",
             showDebugOverlay = p[Keys.DEBUG_OVERLAY] ?: false,
         )
     }

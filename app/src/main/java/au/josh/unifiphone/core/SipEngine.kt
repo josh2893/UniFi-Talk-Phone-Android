@@ -525,7 +525,8 @@ class SipEngine(
         EngineLog.d(
             "VIDEO-TX tuning: rot=${s.videoRotationOffset} mirror=${s.videoMirror} " +
                 "front=${s.videoUseFrontCamera} res=${s.videoResolution} " +
-                "bitrate=${s.videoBitrateKbps} scale=${s.videoScaleMode}"
+                "bitrate=${s.videoBitrateKbps} scale=${s.videoScaleMode} " +
+                "aspect=${s.videoTargetAspect}"
         )
         return VideoSender.Tuning(
             rotationOffset = s.videoRotationOffset,
