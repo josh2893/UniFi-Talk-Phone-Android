@@ -38,6 +38,9 @@ class GlRotationBridge(
     private val mirror: Boolean,
     /** true = center-crop to fill; false = letterbox to fit. */
     private val scaleFill: Boolean = true,
+    /** Source (camera) dimensions, for aspect-correct scaling into the frame. */
+    private val srcWidth: Int = outWidth,
+    private val srcHeight: Int = outHeight,
 ) {
     private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
@@ -72,10 +75,9 @@ class GlRotationBridge(
                 initEgl()
                 initGl()
                 cameraTexture = SurfaceTexture(texId).apply {
-                    setDefaultBufferSize(
-                        if (rotationDegrees % 180 == 0) outWidth else outHeight,
-                        if (rotationDegrees % 180 == 0) outHeight else outWidth,
-                    )
+                    // Request full capture resolution from the camera; the GL draw
+                    // downscales into the (smaller) encoder surface.
+                    setDefaultBufferSize(srcWidth, srcHeight)
                     setOnFrameAvailableListener({ handler?.post { drawFrame() } }, handler)
                 }
                 cameraSurface = Surface(cameraTexture)
@@ -103,14 +105,16 @@ class GlRotationBridge(
             Matrix.setIdentityM(mvpMatrix, 0)
             if (mirror) Matrix.scaleM(mvpMatrix, 0, -1f, 1f, 1f)
             Matrix.rotateM(mvpMatrix, 0, rotationDegrees.toFloat(), 0f, 0f, 1f)
-            // Aspect correction: the camera buffer and the encoder frame may
-            // differ in aspect. "fill" scales up so the frame is covered
-            // (cropping edges); "fit" scales down so everything shows (bars).
-            val camAspect = if (rotationDegrees % 180 == 0)
+            // Aspect correction between the CAMERA buffer and the ENCODER frame.
+            // After the rotation above, the source aspect is expressed in the
+            // pre-rotation axes, so compare src (camera) to the encoder frame in
+            // the same orientation. "fill" = cover (crop edges); "fit" = contain
+            // (letterbox bars).
+            val srcAspect = srcWidth.toFloat() / srcHeight
+            val dstAspect = if (rotationDegrees % 180 == 0)
                 outWidth.toFloat() / outHeight else outHeight.toFloat() / outWidth
-            val dstAspect = outWidth.toFloat() / outHeight
-            if (camAspect > 0 && dstAspect > 0) {
-                val ratio = camAspect / dstAspect
+            if (srcAspect > 0f && dstAspect > 0f) {
+                val ratio = srcAspect / dstAspect
                 val (sx, sy) = if (scaleFill) {
                     if (ratio > 1f) ratio to 1f else 1f to (1f / ratio)
                 } else {

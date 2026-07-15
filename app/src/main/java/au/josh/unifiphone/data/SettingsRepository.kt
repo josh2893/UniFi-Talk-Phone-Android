@@ -51,7 +51,7 @@ data class AppSettings(
 
     // ---- Live video tuning (applied at call setup; no rebuild needed) ----
     // Rotation added to the automatic sensor calc: 0/90/180/270.
-    val videoRotationOffset: Int = 0,
+    val videoRotationOffset: Int = 270,  // 270 confirmed upright on test device
     // Extra mirror toggle on top of the automatic front-camera mirror.
     val videoMirror: Boolean = false,
     // Which physical camera to use for outgoing video.

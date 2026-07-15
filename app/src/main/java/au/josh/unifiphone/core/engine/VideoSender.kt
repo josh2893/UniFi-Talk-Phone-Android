@@ -6,6 +6,7 @@ import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.StreamConfigurationMap
 import android.graphics.SurfaceTexture
 import android.util.Size
@@ -73,10 +74,15 @@ class VideoSender(
             } ?: cm.cameraIdList.firstOrNull()
             if (camId == null) { EngineLog.d("VIDEO-TX: no camera on device"); stop(); return }
 
-            // Camera2 only accepts output sizes the device actually advertises.
             val chars = cm.getCameraCharacteristics(camId)
             val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-            val camSize = pickSize(map)
+            // CAPTURE at the sensor's widest full field-of-view size (largest area
+            // at the native aspect). Picking a small size makes Camera2 hand back a
+            // cropped, zoomed-in region — which is why faces looked telephoto vs the
+            // stock camera app. We downscale to the encode size in the GL bridge.
+            val camSize = pickCaptureSize(map)
+            // ENCODE at the requested target (short edge), keeping capture aspect.
+            val encSize = pickEncodeSize(camSize)
 
             // The sensor is mounted landscape; the handset expects upright portrait.
             // SENSOR_ORIENTATION is the clockwise rotation needed to make the sensor
@@ -91,12 +97,13 @@ class VideoSender(
             val rotation = (((base + tuning.rotationOffset) % 360) + 360) % 360
             val mirror = isFront xor tuning.extraMirror
             // Rotating 90/270 swaps the encoded frame dimensions.
-            val encW = if (rotation % 180 == 0) camSize.width else camSize.height
-            val encH = if (rotation % 180 == 0) camSize.height else camSize.width
+            val encW = if (rotation % 180 == 0) encSize.width else encSize.height
+            val encH = if (rotation % 180 == 0) encSize.height else encSize.width
 
             EngineLog.d(
-                "VIDEO-TX: camera $camId ${camSize.width}x${camSize.height} " +
-                    "sensorOrientation=$sensorOrientation front=$isFront -> encoding ${encW}x${encH}"
+                "VIDEO-TX: camera $camId capture ${camSize.width}x${camSize.height} " +
+                    "encode ${encSize.width}x${encSize.height} rot=$rotation " +
+                    "front=$isFront -> frame ${encW}x${encH}"
             )
 
             val fmt = MediaFormat.createVideoFormat(
@@ -125,6 +132,8 @@ class VideoSender(
                 rotationDegrees = rotation,
                 mirror = mirror,
                 scaleFill = tuning.scaleMode == "fill",
+                srcWidth = camSize.width,
+                srcHeight = camSize.height,
             )
             glBridge = bridge
 
@@ -141,6 +150,9 @@ class VideoSender(
                                     session = s
                                     val req = dev.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
                                     req.addTarget(camTarget)
+                                    // Force full-sensor readout: no digital zoom / crop.
+                                    chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+                                        ?.let { req.set(CaptureRequest.SCALER_CROP_REGION, it) }
                                     runCatching { s.setRepeatingRequest(req.build(), null, handler) }
                                         .onFailure { EngineLog.d("VIDEO-TX: setRepeatingRequest failed: ${it.message}") }
                                 }
@@ -166,25 +178,27 @@ class VideoSender(
      * Choose a real, advertised output size close to 640x360, preferring 16:9-ish
      * and capping at 1280x720 so the handset's decoder isn't overwhelmed.
      */
-    private fun pickSize(map: StreamConfigurationMap?): Size {
+    /** Widest full-FOV capture size: largest area, capped so encode stays cheap. */
+    private fun pickCaptureSize(map: StreamConfigurationMap?): Size {
         val sizes = map?.getOutputSizes(MediaCodec::class.java)?.toList()
             ?: map?.getOutputSizes(android.graphics.ImageFormat.YUV_420_888)?.toList()
-            ?: return Size(640, 480)
-        // If a short-edge target is set, match the nearest advertised size to it.
-        if (tuning.resolutionShortEdge > 0) {
-            val target = tuning.resolutionShortEdge
-            return sizes.minByOrNull { kotlin.math.abs(minOf(it.width, it.height) - target) }
-                ?: Size(640, 480)
-        }
-        val usable = sizes.filter { it.width <= 1280 && it.height <= 720 }
-            .ifEmpty { sizes.sortedBy { it.width * it.height }.take(1) }
-        return usable.minByOrNull { s ->
-            val areaDiff = kotlin.math.abs(s.width * s.height - 640 * 360)
-            val ratioDiff = kotlin.math.abs(
-                (s.width.toDouble() / s.height) - (16.0 / 9.0)
-            ) * 200_000
-            areaDiff + ratioDiff.toInt()
-        } ?: Size(640, 480)
+            ?: return Size(1280, 960)
+        // Prefer the largest advertised size at or below 1280 on the long edge —
+        // big enough for full field of view, small enough to stay efficient.
+        val capped = sizes.filter { maxOf(it.width, it.height) <= 1280 }
+            .ifEmpty { sizes }
+        return capped.maxByOrNull { it.width.toLong() * it.height } ?: Size(1280, 960)
+    }
+
+    /** Encode size: scale the capture size down so its short edge ~= target. */
+    private fun pickEncodeSize(capture: Size): Size {
+        val target = if (tuning.resolutionShortEdge > 0) tuning.resolutionShortEdge else 480
+        val shortEdge = minOf(capture.width, capture.height)
+        if (shortEdge <= target) return capture
+        val scale = target.toDouble() / shortEdge
+        // Keep dimensions even (H.265 requires it).
+        fun even(v: Int) = (v / 2) * 2
+        return Size(even((capture.width * scale).toInt()), even((capture.height * scale).toInt()))
     }
 
     private fun drainLoop() {

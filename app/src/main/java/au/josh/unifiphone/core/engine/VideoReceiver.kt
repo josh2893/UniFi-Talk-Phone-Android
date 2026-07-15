@@ -35,13 +35,27 @@ class VideoReceiver(private val rtp: RtpSession) {
 
     fun attachSurface(s: Surface) {
         surface = s
-        if (running.get() && codec == null) startCodec()
+        // The surface often arrives AFTER start() — in a parallel-ring video call
+        // the CallScreen video view only composes once videoActive flips true,
+        // which is after the winner set media up. So start the codec here if we're
+        // running but haven't yet, and ask the sender for a fresh keyframe, since
+        // any earlier IDR arrived before we had anywhere to render it.
+        if (running.get() && codec == null) {
+            startCodec()
+            seenKeyframe = false
+            requestKeyframe()
+            EngineLog.d("VIDEO-RX: surface attached late, codec started + PLI")
+        }
     }
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
-        if (surface != null) startCodec()
-        requestKeyframe()
+        if (surface != null) {
+            startCodec()
+            requestKeyframe()
+        } else {
+            EngineLog.d("VIDEO-RX: start() with no surface yet, waiting for attach")
+        }
     }
 
     fun onRtpVideo(seq: Int, marker: Boolean, payload: ByteArray) {
