@@ -23,6 +23,7 @@ fun AppSettings.toBackupJson(): String {
     o.put("videoRotationOffset", videoRotationOffset); o.put("videoMirror", videoMirror)
     o.put("videoUseFrontCamera", videoUseFrontCamera); o.put("videoResolution", videoResolution)
     o.put("videoBitrateKbps", videoBitrateKbps); o.put("videoScaleMode", videoScaleMode); o.put("videoTargetAspect", videoTargetAspect)
+    o.put("videoStretchFixPercent", videoStretchFixPercent)
     return o.toString(2)
 }
 
@@ -53,6 +54,7 @@ fun appSettingsFromBackupJson(json: String, base: AppSettings = AppSettings()): 
         videoBitrateKbps = int("videoBitrateKbps", base.videoBitrateKbps),
         videoScaleMode = str("videoScaleMode", base.videoScaleMode),
         videoTargetAspect = str("videoTargetAspect", base.videoTargetAspect),
+        videoStretchFixPercent = int("videoStretchFixPercent", base.videoStretchFixPercent),
     )
 }
 
@@ -112,6 +114,8 @@ data class AppSettings(
     // Target aspect of the ENCODED frame: "source" (camera), "9:16", "3:4", "1:1".
     // UTP-Touch renders video in a portrait viewport, so default to portrait.
     val videoTargetAspect: String = "9:16",
+    // Pre-squeeze outgoing pixels horizontally before encoding. 100 = neutral.
+    val videoStretchFixPercent: Int = 100,
     // Show a live stats overlay (packet/frame counters) during calls.
     val showDebugOverlay: Boolean = false,
 )
@@ -139,6 +143,7 @@ class SettingsRepository(private val context: Context) {
         val VIDEO_BITRATE = androidx.datastore.preferences.core.intPreferencesKey("video_bitrate")
         val VIDEO_SCALE = stringPreferencesKey("video_scale_mode")
         val VIDEO_ASPECT = stringPreferencesKey("video_target_aspect")
+        val VIDEO_STRETCH_FIX = androidx.datastore.preferences.core.intPreferencesKey("video_stretch_fix_percent")
         val DEBUG_OVERLAY = booleanPreferencesKey("debug_overlay")
     }
 
@@ -166,6 +171,7 @@ class SettingsRepository(private val context: Context) {
             videoBitrateKbps = p[Keys.VIDEO_BITRATE] ?: 800,
             videoScaleMode = p[Keys.VIDEO_SCALE] ?: "fill",
             videoTargetAspect = p[Keys.VIDEO_ASPECT] ?: "9:16",
+            videoStretchFixPercent = p[Keys.VIDEO_STRETCH_FIX] ?: 100,
             showDebugOverlay = p[Keys.DEBUG_OVERLAY] ?: false,
         )
     }
@@ -195,6 +201,7 @@ class SettingsRepository(private val context: Context) {
             p[Keys.VIDEO_BITRATE] = next.videoBitrateKbps
             p[Keys.VIDEO_SCALE] = next.videoScaleMode
             p[Keys.VIDEO_ASPECT] = next.videoTargetAspect
+            p[Keys.VIDEO_STRETCH_FIX] = next.videoStretchFixPercent.coerceIn(40, 140)
             p[Keys.DEBUG_OVERLAY] = next.showDebugOverlay
         }
     }

@@ -526,7 +526,7 @@ class SipEngine(
             "VIDEO-TX tuning: rot=${s.videoRotationOffset} mirror=${s.videoMirror} " +
                 "front=${s.videoUseFrontCamera} res=${s.videoResolution} " +
                 "bitrate=${s.videoBitrateKbps} scale=${s.videoScaleMode} " +
-                "aspect=${s.videoTargetAspect}"
+                "aspect=${s.videoTargetAspect} stretchFix=${s.videoStretchFixPercent}"
         )
         return VideoSender.Tuning(
             rotationOffset = s.videoRotationOffset,
@@ -536,6 +536,7 @@ class SipEngine(
             bitrateKbps = s.videoBitrateKbps,
             scaleMode = s.videoScaleMode,
             targetAspect = s.videoTargetAspect,
+            stretchFixPercent = s.videoStretchFixPercent,
         )
     }
 

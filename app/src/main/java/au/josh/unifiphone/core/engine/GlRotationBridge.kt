@@ -38,6 +38,8 @@ class GlRotationBridge(
     private val mirror: Boolean,
     /** true = center-crop to fill; false = letterbox to fit. */
     private val scaleFill: Boolean = true,
+    /** Percent width compensation applied after aspect correction. */
+    private val stretchFixPercent: Int = 100,
     /** Source (camera) dimensions, for aspect-correct scaling into the frame. */
     private val srcWidth: Int = outWidth,
     private val srcHeight: Int = outHeight,
@@ -84,7 +86,7 @@ class GlRotationBridge(
                 EngineLog.d(
                     "VIDEO-TX: GL bridge src=${srcWidth}x${srcHeight} " +
                         "out=${outWidth}x${outHeight} rot=$rotationDegrees " +
-                        "mirror=$mirror fill=$scaleFill " +
+                        "mirror=$mirror fill=$scaleFill stretchFix=$stretchFixPercent " +
                         "srcAspect=${"%.3f".format(srcWidth.toFloat()/srcHeight)} " +
                         "outAspect=${"%.3f".format(outWidth.toFloat()/outHeight)}"
                 )
@@ -127,6 +129,15 @@ class GlRotationBridge(
                     if (ratio > 1f) 1f to (1f / ratio) else ratio to 1f
                 }
                 Matrix.scaleM(mvpMatrix, 0, sx, sy, 1f)
+            }
+            val stretchFix = stretchFixPercent.coerceIn(40, 140) / 100f
+            if (stretchFix != 1f) {
+                val compensation = FloatArray(16)
+                val adjusted = FloatArray(16)
+                Matrix.setIdentityM(compensation, 0)
+                Matrix.scaleM(compensation, 0, stretchFix, 1f, 1f)
+                Matrix.multiplyMM(adjusted, 0, compensation, 0, mvpMatrix, 0)
+                System.arraycopy(adjusted, 0, mvpMatrix, 0, adjusted.size)
             }
 
             GLES20.glUniformMatrix4fv(uMvp, 1, false, mvpMatrix, 0)

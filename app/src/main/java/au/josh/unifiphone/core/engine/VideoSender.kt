@@ -41,6 +41,7 @@ class VideoSender(
         val bitrateKbps: Int = 800,
         val scaleMode: String = "fill",   // "fill" (crop) or "fit" (letterbox)
         val targetAspect: String = "source", // "source","9:16","3:4","1:1"
+        val stretchFixPercent: Int = 100, // 100 = neutral; lower squeezes width
     )
 
     private val running = AtomicBoolean(false)
@@ -137,6 +138,7 @@ class VideoSender(
                 rotationDegrees = rotation,
                 mirror = mirror,
                 scaleFill = tuning.scaleMode == "fill",
+                stretchFixPercent = tuning.stretchFixPercent,
                 srcWidth = camSize.width,
                 srcHeight = camSize.height,
             )
@@ -237,6 +239,11 @@ class VideoSender(
         val info = MediaCodec.BufferInfo()
         while (running.get()) {
             val idx = try { c.dequeueOutputBuffer(info, 100_000) } catch (_: Exception) { return }
+            if (idx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                val fmt = runCatching { c.outputFormat }.getOrNull()
+                EngineLog.d("VIDEO-TX: encoder output format $fmt")
+                continue
+            }
             if (idx < 0) continue
             val buf = c.getOutputBuffer(idx) ?: continue
             val data = ByteArray(info.size)
