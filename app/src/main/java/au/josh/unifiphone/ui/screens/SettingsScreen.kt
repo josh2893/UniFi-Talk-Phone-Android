@@ -5,6 +5,7 @@ import android.media.MediaPlayer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -173,6 +174,67 @@ fun SettingsScreen(vm: PhoneViewModel) {
                 checked = settings.videoUpgradeDebug,
                 onChange = { vm.updateSettings { s -> s.copy(videoUpgradeDebug = it) } },
             )
+        }
+
+        SectionCard("Video tuning (live — no rebuild)") {
+            // Rotation stepper
+            StepperRow(
+                label = "Rotation",
+                value = "${settings.videoRotationOffset}°",
+                onTap = {
+                    val next = (settings.videoRotationOffset + 90) % 360
+                    vm.updateSettings { s -> s.copy(videoRotationOffset = next) }
+                },
+            )
+            ToggleRow(
+                title = "Extra mirror",
+                subtitle = "Flip horizontally (on top of the automatic front-camera mirror)",
+                checked = settings.videoMirror,
+                onChange = { vm.updateSettings { s -> s.copy(videoMirror = it) } },
+            )
+            ToggleRow(
+                title = "Front camera",
+                subtitle = "Off = use the rear camera for outgoing video",
+                checked = settings.videoUseFrontCamera,
+                onChange = { vm.updateSettings { s -> s.copy(videoUseFrontCamera = it) } },
+            )
+            // Resolution cycler
+            StepperRow(
+                label = "Resolution (short edge)",
+                value = if (settings.videoResolution == 0) "Auto" else "${settings.videoResolution}p",
+                onTap = {
+                    val opts = listOf(0, 240, 360, 480, 720)
+                    val idx = opts.indexOf(settings.videoResolution).let { if (it < 0) 0 else it }
+                    val next = opts[(idx + 1) % opts.size]
+                    vm.updateSettings { s -> s.copy(videoResolution = next) }
+                },
+            )
+            // Bitrate cycler
+            StepperRow(
+                label = "Bitrate",
+                value = "${settings.videoBitrateKbps} kbps",
+                onTap = {
+                    val opts = listOf(300, 500, 800, 1200, 2000, 4000)
+                    val idx = opts.indexOf(settings.videoBitrateKbps).let { if (it < 0) 2 else it }
+                    val next = opts[(idx + 1) % opts.size]
+                    vm.updateSettings { s -> s.copy(videoBitrateKbps = next) }
+                },
+            )
+            // Scale mode toggle
+            StepperRow(
+                label = "Scale mode",
+                value = if (settings.videoScaleMode == "fill") "Fill (crop)" else "Fit (letterbox)",
+                onTap = {
+                    val next = if (settings.videoScaleMode == "fill") "fit" else "fill"
+                    vm.updateSettings { s -> s.copy(videoScaleMode = next) }
+                },
+            )
+            Text(
+                "Changes apply on the NEXT call — hang up and redial to see them. " +
+                    "Tune rotation first (portrait upright), then resolution/bitrate for quality.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Text(
                 "Ring list: enter several extensions separated by commas on the " +
                     "dial pad (e.g. 10,11,12) to ring them all at once — first to " +
@@ -277,5 +339,21 @@ private fun ToggleRow(title: String, subtitle: String, checked: Boolean, onChang
             )
         }
         Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+@Composable
+private fun StepperRow(label: String, value: String, onTap: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onTap),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+    ) {
+        Text(label, modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
+        Text(
+            value,
+            color = MaterialTheme.colorScheme.primary,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }

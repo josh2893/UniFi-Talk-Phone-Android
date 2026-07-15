@@ -36,6 +36,8 @@ class GlRotationBridge(
     private val rotationDegrees: Int,
     /** Mirror horizontally (front camera). Applied before rotation. */
     private val mirror: Boolean,
+    /** true = center-crop to fill; false = letterbox to fit. */
+    private val scaleFill: Boolean = true,
 ) {
     private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
@@ -101,6 +103,21 @@ class GlRotationBridge(
             Matrix.setIdentityM(mvpMatrix, 0)
             if (mirror) Matrix.scaleM(mvpMatrix, 0, -1f, 1f, 1f)
             Matrix.rotateM(mvpMatrix, 0, rotationDegrees.toFloat(), 0f, 0f, 1f)
+            // Aspect correction: the camera buffer and the encoder frame may
+            // differ in aspect. "fill" scales up so the frame is covered
+            // (cropping edges); "fit" scales down so everything shows (bars).
+            val camAspect = if (rotationDegrees % 180 == 0)
+                outWidth.toFloat() / outHeight else outHeight.toFloat() / outWidth
+            val dstAspect = outWidth.toFloat() / outHeight
+            if (camAspect > 0 && dstAspect > 0) {
+                val ratio = camAspect / dstAspect
+                val (sx, sy) = if (scaleFill) {
+                    if (ratio > 1f) ratio to 1f else 1f to (1f / ratio)
+                } else {
+                    if (ratio > 1f) 1f to (1f / ratio) else ratio to 1f
+                }
+                Matrix.scaleM(mvpMatrix, 0, sx, sy, 1f)
+            }
 
             GLES20.glUniformMatrix4fv(uMvp, 1, false, mvpMatrix, 0)
             GLES20.glUniformMatrix4fv(uTexMatrix, 1, false, stMatrix, 0)

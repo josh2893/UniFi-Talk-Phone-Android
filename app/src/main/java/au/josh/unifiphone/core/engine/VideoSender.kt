@@ -26,7 +26,20 @@ import java.util.concurrent.atomic.AtomicBoolean
  * PARAMETER_KEY_REQUEST_SYNC_FRAME. Codec-config (VPS/SPS/PPS) is cached and
  * prepended to every keyframe so a late-joining decoder can always sync.
  */
-class VideoSender(private val context: Context, private val rtp: RtpSession) {
+class VideoSender(
+    private val context: Context,
+    private val rtp: RtpSession,
+    private val tuning: Tuning = Tuning(),
+) {
+    /** Live video-tuning knobs, read from settings at call setup. */
+    data class Tuning(
+        val rotationOffset: Int = 0,
+        val extraMirror: Boolean = false,
+        val useFrontCamera: Boolean = true,
+        val resolutionShortEdge: Int = 0, // 0 = auto
+        val bitrateKbps: Int = 800,
+        val scaleMode: String = "fill",   // "fill" (crop) or "fit" (letterbox)
+    )
 
     private val running = AtomicBoolean(false)
     private var codec: MediaCodec? = null
@@ -46,7 +59,7 @@ class VideoSender(private val context: Context, private val rtp: RtpSession) {
     }
 
     @SuppressLint("MissingPermission")
-    fun start(useFrontCamera: Boolean = true) {
+    fun start(useFrontCamera: Boolean = tuning.useFrontCamera) {
         if (!running.compareAndSet(false, true)) return
         try {
             cameraThread = HandlerThread("cam").apply { start() }
@@ -71,7 +84,12 @@ class VideoSender(private val context: Context, private val rtp: RtpSession) {
             val sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
             val facing = chars.get(CameraCharacteristics.LENS_FACING)
             val isFront = facing == CameraCharacteristics.LENS_FACING_FRONT
-            val rotation = ((sensorOrientation % 360) + 360) % 360
+            // Front cameras are mirrored, so the upright rotation runs OPPOSITE to
+            // the sensor constant — using sensorOrientation directly comes out 180
+            // off. Back cameras use it as-is. Manual offset handles odd mounts.
+            val base = if (isFront) (360 - sensorOrientation) else sensorOrientation
+            val rotation = (((base + tuning.rotationOffset) % 360) + 360) % 360
+            val mirror = isFront xor tuning.extraMirror
             // Rotating 90/270 swaps the encoded frame dimensions.
             val encW = if (rotation % 180 == 0) camSize.width else camSize.height
             val encH = if (rotation % 180 == 0) camSize.height else camSize.width
@@ -85,7 +103,7 @@ class VideoSender(private val context: Context, private val rtp: RtpSession) {
                 MediaFormat.MIMETYPE_VIDEO_HEVC, encW, encH
             ).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-                setInteger(MediaFormat.KEY_BIT_RATE, 800_000)
+                setInteger(MediaFormat.KEY_BIT_RATE, tuning.bitrateKbps * 1000)
                 setInteger(MediaFormat.KEY_FRAME_RATE, 15)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
                 setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
@@ -105,7 +123,8 @@ class VideoSender(private val context: Context, private val rtp: RtpSession) {
                 outWidth = encW,
                 outHeight = encH,
                 rotationDegrees = rotation,
-                mirror = isFront,
+                mirror = mirror,
+                scaleFill = tuning.scaleMode == "fill",
             )
             glBridge = bridge
 
@@ -151,6 +170,12 @@ class VideoSender(private val context: Context, private val rtp: RtpSession) {
         val sizes = map?.getOutputSizes(MediaCodec::class.java)?.toList()
             ?: map?.getOutputSizes(android.graphics.ImageFormat.YUV_420_888)?.toList()
             ?: return Size(640, 480)
+        // If a short-edge target is set, match the nearest advertised size to it.
+        if (tuning.resolutionShortEdge > 0) {
+            val target = tuning.resolutionShortEdge
+            return sizes.minByOrNull { kotlin.math.abs(minOf(it.width, it.height) - target) }
+                ?: Size(640, 480)
+        }
         val usable = sizes.filter { it.width <= 1280 && it.height <= 720 }
             .ifEmpty { sizes.sortedBy { it.width * it.height }.take(1) }
         return usable.minByOrNull { s ->

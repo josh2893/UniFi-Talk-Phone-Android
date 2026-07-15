@@ -3,6 +3,7 @@ package au.josh.unifiphone.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -31,7 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -64,46 +65,10 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
 
     val videoOn = call.videoActive && call.connected
 
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-    ) {
-        // Video is a full-bleed BACKGROUND layer. Controls float on top of it,
-        // so opening the keypad never squashes or displaces the picture.
-        if (videoOn) {
-            AndroidView(
-                factory = { ctx ->
-                    SurfaceView(ctx).apply {
-                        holder.addCallback(object : SurfaceHolder.Callback {
-                            override fun surfaceCreated(h: SurfaceHolder) {
-                                vm.engine.attachRemoteVideoSurface(h.surface)
-                            }
-                            override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, ht: Int) {}
-                            override fun surfaceDestroyed(h: SurfaceHolder) {}
-                        })
-                    }
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-            // Scrim so white text/buttons stay legible over bright video.
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            0f to Color.Black.copy(alpha = 0.45f),
-                            0.25f to Color.Transparent,
-                            0.60f to Color.Transparent,
-                            1f to Color.Black.copy(alpha = 0.70f),
-                        )
-                    )
-            )
-        }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .padding(horizontal = 24.dp, vertical = if (videoOn) 12.dp else 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -138,8 +103,40 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
             onDispose { view.keepScreenOn = false }
         }
 
-        // Push controls to the bottom; video (if any) shows through behind.
-        Spacer(Modifier.weight(1f))
+        if (videoOn) {
+            Spacer(Modifier.height(12.dp))
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .clip(RoundedCornerShape(16.dp)),
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        SurfaceView(ctx).apply {
+                            holder.addCallback(object : SurfaceHolder.Callback {
+                                override fun surfaceCreated(h: SurfaceHolder) {
+                                    vm.engine.attachRemoteVideoSurface(h.surface)
+                                }
+                                override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, ht: Int) {}
+                                override fun surfaceDestroyed(h: SurfaceHolder) {}
+                            })
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+                if (showDtmf) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                        Box(Modifier.background(Color.Black.copy(alpha = 0.6f))) {
+                            Keypad(compact = true, onKey = { vm.engine.sendDtmf(it) })
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        } else {
+            Spacer(Modifier.weight(1f))
+        }
 
         if (call.incoming) {
             Row(horizontalArrangement = Arrangement.spacedBy(64.dp)) {
@@ -151,7 +148,7 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
                 }
             }
         } else {
-            if (showDtmf) {
+            if (showDtmf && !videoOn) {
                 Keypad(compact = true, onKey = { vm.engine.sendDtmf(it) })
                 Spacer(Modifier.height(20.dp))
             }
@@ -202,8 +199,7 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
                 Icon(Icons.Filled.CallEnd, "End call", tint = Color.White)
             }
         }
-        Spacer(Modifier.height(if (videoOn) 16.dp else 40.dp))
-    }
+        Spacer(Modifier.height(if (videoOn) 12.dp else 40.dp))
     }
 }
 

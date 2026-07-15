@@ -48,6 +48,22 @@ data class AppSettings(
     // MIGHT accept a mid-call video upgrade (bypass_media makes the media path
     // peer-to-peer once bridged). Off by default.
     val videoUpgradeDebug: Boolean = false,
+
+    // ---- Live video tuning (applied at call setup; no rebuild needed) ----
+    // Rotation added to the automatic sensor calc: 0/90/180/270.
+    val videoRotationOffset: Int = 0,
+    // Extra mirror toggle on top of the automatic front-camera mirror.
+    val videoMirror: Boolean = false,
+    // Which physical camera to use for outgoing video.
+    val videoUseFrontCamera: Boolean = true,
+    // Target encode resolution (short edge). 0 = auto-pick nearest supported.
+    // Common: 240, 360, 480, 720. The nearest advertised size is chosen.
+    val videoResolution: Int = 0,
+    // Encoder bitrate in kbps.
+    val videoBitrateKbps: Int = 800,
+    // Scale/crop mode for how the camera frame fills the encoded frame.
+    // "fit" = letterbox (whole frame, bars), "fill" = center-crop (fills, trims).
+    val videoScaleMode: String = "fill",
 )
 
 class SettingsRepository(private val context: Context) {
@@ -66,6 +82,12 @@ class SettingsRepository(private val context: Context) {
         val RINGTONE = stringPreferencesKey("ringtone")
         val VIDEO_CALLS = booleanPreferencesKey("video_calls")
         val VIDEO_UPGRADE_DEBUG = booleanPreferencesKey("video_upgrade_debug")
+        val VIDEO_ROTATION = androidx.datastore.preferences.core.intPreferencesKey("video_rotation_offset")
+        val VIDEO_MIRROR = booleanPreferencesKey("video_mirror")
+        val VIDEO_FRONT = booleanPreferencesKey("video_front_camera")
+        val VIDEO_RES = androidx.datastore.preferences.core.intPreferencesKey("video_resolution")
+        val VIDEO_BITRATE = androidx.datastore.preferences.core.intPreferencesKey("video_bitrate")
+        val VIDEO_SCALE = stringPreferencesKey("video_scale_mode")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -85,6 +107,12 @@ class SettingsRepository(private val context: Context) {
             ringtone = p[Keys.RINGTONE] ?: "raw:ringtone_classic",
             videoCalls = p[Keys.VIDEO_CALLS] ?: false,
             videoUpgradeDebug = p[Keys.VIDEO_UPGRADE_DEBUG] ?: false,
+            videoRotationOffset = p[Keys.VIDEO_ROTATION] ?: 0,
+            videoMirror = p[Keys.VIDEO_MIRROR] ?: false,
+            videoUseFrontCamera = p[Keys.VIDEO_FRONT] ?: true,
+            videoResolution = p[Keys.VIDEO_RES] ?: 0,
+            videoBitrateKbps = p[Keys.VIDEO_BITRATE] ?: 800,
+            videoScaleMode = p[Keys.VIDEO_SCALE] ?: "fill",
         )
     }
 
@@ -106,6 +134,12 @@ class SettingsRepository(private val context: Context) {
             p[Keys.RINGTONE] = next.ringtone
             p[Keys.VIDEO_CALLS] = next.videoCalls
             p[Keys.VIDEO_UPGRADE_DEBUG] = next.videoUpgradeDebug
+            p[Keys.VIDEO_ROTATION] = next.videoRotationOffset
+            p[Keys.VIDEO_MIRROR] = next.videoMirror
+            p[Keys.VIDEO_FRONT] = next.videoUseFrontCamera
+            p[Keys.VIDEO_RES] = next.videoResolution
+            p[Keys.VIDEO_BITRATE] = next.videoBitrateKbps
+            p[Keys.VIDEO_SCALE] = next.videoScaleMode
         }
     }
 }

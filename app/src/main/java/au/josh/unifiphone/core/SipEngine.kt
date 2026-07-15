@@ -230,7 +230,7 @@ class SipEngine(
                 onKeyframeRequest = { videoTx?.requestKeyframe() },
             )
             videoRx = VideoReceiver(videoRtp!!)
-            videoTx = VideoSender(context, videoRtp!!)
+            videoTx = VideoSender(context, videoRtp!!, buildVideoTuning())
             pendingRemoteSurface?.let { videoRx?.attachSurface(it) }
         }
         val sdp = Sdp.build(
@@ -410,8 +410,9 @@ class SipEngine(
 
         override fun onCallAnswered(call: SipClient.Dialog, answer: SdpSession) {
             if (parallelRingActive) {
-                // First answer wins. CANCEL every other ringing leg, then build
-                // media for the winner only.
+                // First answer wins. CANCEL every other ringing leg, then build a
+                // real media session for the winner. The ringing legs carried
+                // throwaway SDP ports (no media), so we set media up fresh here.
                 parallelRingActive = false
                 val losers = ringingDialogs.filter { it.callId != call.callId }
                 ringingDialogs.clear()
@@ -420,20 +421,28 @@ class SipEngine(
                     runCatching { sip?.cancel(l) }
                 }
                 dialog = call
-                val s = currentSettings
-                val chosenPt = when {
+                val withVideo = answer.video() != null
+                setupMedia(video = withVideo)
+
+                // Point our fresh RTP sessions at the winner's advertised media.
+                answer.audio()?.let { audioRtp?.setRemote(answer.remoteIp, it.port, it.rtcpPort) }
+                answer.video()?.let { videoRtp?.setRemote(answer.remoteIp, it.port, it.rtcpPort) }
+                audio?.txPayloadType = when {
                     Sdp.PT_PCMU in (answer.audio()?.payloadTypes ?: emptyList()) -> Sdp.PT_PCMU
                     else -> Sdp.PT_PCMA
                 }
-                setupMedia(video = answer.video() != null && s?.videoCalls == true)
-                audio?.txPayloadType = chosenPt
+                startMedia(sendVideo = withVideo)
+                callAnsweredAt = System.currentTimeMillis()
                 scope.launch {
                     _callState.value = _callState.value.copy(
-                        remoteNumber = call.remoteTarget
-                            .substringAfter("sip:").substringBefore("@"),
+                        connected = true,
+                        startedAtMs = callAnsweredAt,
+                        videoActive = withVideo,
+                        remoteNumber = call.remoteTarget.substringAfter("sip:").substringBefore("@"),
                         remoteName = null,
                     )
                 }
+                return  // fully handled; don't fall through to the single-leg path
             }
             val audioMedia = answer.audio() ?: run { hangup(); return }
             audioRtp?.setRemote(answer.remoteIp, audioMedia.port, audioMedia.rtcpPort)
@@ -488,6 +497,18 @@ class SipEngine(
 
     // ---- Media plumbing -------------------------------------------------
 
+    private fun buildVideoTuning(): VideoSender.Tuning {
+        val s = currentSettings ?: return VideoSender.Tuning()
+        return VideoSender.Tuning(
+            rotationOffset = s.videoRotationOffset,
+            extraMirror = s.videoMirror,
+            useFrontCamera = s.videoUseFrontCamera,
+            resolutionShortEdge = s.videoResolution,
+            bitrateKbps = s.videoBitrateKbps,
+            scaleMode = s.videoScaleMode,
+        )
+    }
+
     private fun setupMedia(video: Boolean) {
         teardownMedia()
         val aPort = RtpSession.allocatePortPair()
@@ -505,7 +526,7 @@ class SipEngine(
                 onKeyframeRequest = { videoTx?.requestKeyframe() },
             )
             videoRx = VideoReceiver(videoRtp!!)
-            videoTx = VideoSender(context, videoRtp!!)
+            videoTx = VideoSender(context, videoRtp!!, buildVideoTuning())
             pendingRemoteSurface?.let { videoRx?.attachSurface(it) }
         }
     }
