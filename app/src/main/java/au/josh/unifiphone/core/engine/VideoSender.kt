@@ -85,26 +85,30 @@ class VideoSender(
             // ENCODE at the requested target (short edge), keeping capture aspect.
             val encSize = pickEncodeSize(camSize)
 
-            // The sensor is mounted landscape; the handset expects upright portrait.
-            // SENSOR_ORIENTATION is the clockwise rotation needed to make the sensor
-            // image upright for a device held in its natural (portrait) orientation.
             val sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
             val facing = chars.get(CameraCharacteristics.LENS_FACING)
             val isFront = facing == CameraCharacteristics.LENS_FACING_FRONT
-            // Front cameras are mirrored, so the upright rotation runs OPPOSITE to
-            // the sensor constant — using sensorOrientation directly comes out 180
-            // off. Back cameras use it as-is. Manual offset handles odd mounts.
-            val base = if (isFront) (360 - sensorOrientation) else sensorOrientation
-            val rotation = (((base + tuning.rotationOffset) % 360) + 360) % 360
+            // Rotation is PURELY the manual setting — no auto sensor calc. The auto
+            // math compounded with the offset and cancelled out (e.g. front sensor
+            // 270 + offset 270 = 0). What you set is exactly what's applied.
+            val rotation = ((tuning.rotationOffset % 360) + 360) % 360
             val mirror = isFront xor tuning.extraMirror
-            // Rotating 90/270 swaps the encoded frame dimensions.
-            val encW = if (rotation % 180 == 0) encSize.width else encSize.height
-            val encH = if (rotation % 180 == 0) encSize.height else encSize.width
-
+            EngineLog.d("VIDEO-TX: sensor=$sensorOrientation applied rotation=$rotation (pure manual)")
+            // The encoder frame is the pre-rotation buffer. For 90/270 the GL
+            // rotation turns encSize (landscape HxW) into portrait; the encoder
+            // surface itself must be sized to the POST-rotation portrait so the
+            // pixels land right. For 0/180 it stays as-is.
+            val encW: Int
+            val encH: Int
+            if (rotation % 180 == 0) {
+                encW = encSize.width; encH = encSize.height
+            } else {
+                encW = encSize.height; encH = encSize.width
+            }
             EngineLog.d(
                 "VIDEO-TX: camera $camId capture ${camSize.width}x${camSize.height} " +
-                    "encode ${encSize.width}x${encSize.height} rot=$rotation " +
-                    "front=$isFront -> frame ${encW}x${encH}"
+                    "encSize ${encSize.width}x${encSize.height} rot=$rotation " +
+                    "front=$isFront -> encoder frame ${encW}x${encH}"
             )
 
             val fmt = MediaFormat.createVideoFormat(
@@ -195,21 +199,32 @@ class VideoSender(
      * Encode size: scale capture down so its SHORT edge ~= target, preserving the
      * capture aspect ratio exactly (so nothing stretches). Default target 480.
      */
+    /**
+     * Encode frame size, expressed in PRE-ROTATION (landscape) orientation.
+     * The final portrait shown on the handset is target-aspect Wp:Hp; the frame
+     * we hand the encoder before a 90/270 rotation is the landscape Hp:Wp.
+     *
+     * "target" here = the portrait SHORT edge (width) in pixels.
+     */
     private fun pickEncodeSize(capture: Size): Size {
-        val target = if (tuning.resolutionShortEdge > 0) tuning.resolutionShortEdge else 480
+        val shortEdge = if (tuning.resolutionShortEdge > 0) tuning.resolutionShortEdge else 480
         fun even(v: Int) = maxOf(2, (v / 2) * 2)
-        // Landscape encode dims; the rotation swap to portrait happens later.
-        // targetAspect is expressed as the PORTRAIT ratio the handset displays;
-        // as a landscape frame that's height:width.
-        val (portW, portH) = when (tuning.targetAspect) {
-            "9:16" -> 9 to 16
-            "3:4" -> 3 to 4
-            "1:1" -> 1 to 1
-            else -> minOf(capture.width, capture.height) to maxOf(capture.width, capture.height)
+        // Portrait width:height (Wp < Hp).
+        val (wp, hp) = when (tuning.targetAspect) {
+            "9:16" -> 9.0 to 16.0
+            "3:4" -> 3.0 to 4.0
+            "1:1" -> 1.0 to 1.0
+            else -> {
+                // "source": camera is landscape L x S; rotated to portrait it's S x L.
+                val s0 = minOf(capture.width, capture.height).toDouble()
+                val l0 = maxOf(capture.width, capture.height).toDouble()
+                s0 to l0
+            }
         }
-        // Build a landscape frame (long x short) with short edge = target.
-        val longEdge = (target.toDouble() * portH / portW).toInt()
-        return Size(even(longEdge), even(target))
+        val portraitW = shortEdge
+        val portraitH = (shortEdge * hp / wp).toInt()
+        // Pre-rotation landscape frame = portraitH x portraitW.
+        return Size(even(portraitH), even(portraitW))
     }
 
     private fun drainLoop() {

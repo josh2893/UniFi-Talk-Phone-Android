@@ -80,6 +80,10 @@ class SipEngine(
      * single media session for the winner, reusing the normal path.
      */
     private val ringingDialogs = mutableListOf<SipClient.Dialog>()
+    // Per-leg local media ports (callId -> audioPort to videoPort). The winner
+    // must bind the SAME ports it advertised, or the handset sends media to a
+    // port nothing is listening on (blank video / silent audio).
+    private val ringLegPorts = mutableMapOf<String, Pair<Int, Int?>>()
     private var parallelRingActive = false
     private var pendingVideoUpgrade = false
     private var audioRtp: RtpSession? = null
@@ -200,6 +204,7 @@ class SipEngine(
             val d = client.invite(t, sdp)
             d.localSdp = sdp
             ringingDialogs.add(d)
+            ringLegPorts[d.callId] = aPort to vPort
             EngineLog.d("RING: INVITE -> $t (audio $aPort${vPort?.let { ", video $it" } ?: ""})")
         }
 
@@ -435,9 +440,13 @@ class SipEngine(
                 }
                 dialog = call
                 val withVideo = answer.video() != null
-                setupMedia(video = withVideo)
+                val legPorts = ringLegPorts[call.callId]
+                setupMediaOnPorts(
+                    audioPort = legPorts?.first,
+                    videoPort = if (withVideo) legPorts?.second else null,
+                )
 
-                // Point our fresh RTP sessions at the winner's advertised media.
+                // Point our RTP sessions at the winner's advertised media.
                 answer.audio()?.let { audioRtp?.setRemote(answer.remoteIp, it.port, it.rtcpPort) }
                 answer.video()?.let { videoRtp?.setRemote(answer.remoteIp, it.port, it.rtcpPort) }
                 audio?.txPayloadType = when {
@@ -528,6 +537,31 @@ class SipEngine(
         )
     }
 
+    /**
+     * Like setupMedia, but binds SPECIFIC local ports (those a parallel-ring leg
+     * already advertised to the handset). Falls back to fresh ports if null.
+     */
+    private fun setupMediaOnPorts(audioPort: Int?, videoPort: Int?) {
+        teardownMedia()
+        val aPort = audioPort ?: RtpSession.allocatePortPair()
+        audioRtp = RtpSession(aPort, onPacket = { pt, _, _, _, payload ->
+            audio?.onRtpAudio(pt, payload)
+        })
+        audio = AudioStream(audioRtp!!)
+        if (videoPort != null) {
+            videoRtp = RtpSession(
+                videoPort,
+                onPacket = { pt, marker, seq, _, payload ->
+                    if (pt == Sdp.PT_H265) videoRx?.onRtpVideo(seq, marker, payload)
+                },
+                onKeyframeRequest = { videoTx?.requestKeyframe() },
+            )
+            videoRx = VideoReceiver(videoRtp!!)
+            videoTx = VideoSender(context, videoRtp!!, buildVideoTuning())
+            pendingRemoteSurface?.let { videoRx?.attachSurface(it) }
+        }
+    }
+
     private fun setupMedia(video: Boolean) {
         teardownMedia()
         val aPort = RtpSession.allocatePortPair()
@@ -564,6 +598,7 @@ class SipEngine(
     private fun clearRingState() {
         parallelRingActive = false
         ringingDialogs.clear()
+        ringLegPorts.clear()
         pendingVideoUpgrade = false
     }
 
