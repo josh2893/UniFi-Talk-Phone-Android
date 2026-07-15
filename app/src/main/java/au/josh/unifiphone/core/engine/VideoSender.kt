@@ -40,6 +40,7 @@ class VideoSender(
         val resolutionShortEdge: Int = 0, // 0 = auto
         val bitrateKbps: Int = 800,
         val scaleMode: String = "fill",   // "fill" (crop) or "fit" (letterbox)
+        val targetAspect: String = "source", // "source","9:16","3:4","1:1"
     )
 
     private val running = AtomicBoolean(false)
@@ -190,15 +191,25 @@ class VideoSender(
         return capped.maxByOrNull { it.width.toLong() * it.height } ?: Size(1280, 960)
     }
 
-    /** Encode size: scale the capture size down so its short edge ~= target. */
+    /**
+     * Encode size: scale capture down so its SHORT edge ~= target, preserving the
+     * capture aspect ratio exactly (so nothing stretches). Default target 480.
+     */
     private fun pickEncodeSize(capture: Size): Size {
         val target = if (tuning.resolutionShortEdge > 0) tuning.resolutionShortEdge else 480
-        val shortEdge = minOf(capture.width, capture.height)
-        if (shortEdge <= target) return capture
-        val scale = target.toDouble() / shortEdge
-        // Keep dimensions even (H.265 requires it).
-        fun even(v: Int) = (v / 2) * 2
-        return Size(even((capture.width * scale).toInt()), even((capture.height * scale).toInt()))
+        fun even(v: Int) = maxOf(2, (v / 2) * 2)
+        // Landscape encode dims; the rotation swap to portrait happens later.
+        // targetAspect is expressed as the PORTRAIT ratio the handset displays;
+        // as a landscape frame that's height:width.
+        val (portW, portH) = when (tuning.targetAspect) {
+            "9:16" -> 9 to 16
+            "3:4" -> 3 to 4
+            "1:1" -> 1 to 1
+            else -> minOf(capture.width, capture.height) to maxOf(capture.width, capture.height)
+        }
+        // Build a landscape frame (long x short) with short edge = target.
+        val longEdge = (target.toDouble() * portH / portW).toInt()
+        return Size(even(longEdge), even(target))
     }
 
     private fun drainLoop() {

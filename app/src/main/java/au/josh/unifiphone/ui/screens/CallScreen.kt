@@ -41,6 +41,7 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.viewinterop.AndroidView
 import au.josh.unifiphone.PhoneViewModel
@@ -95,6 +96,24 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
             color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.Medium,
         )
+
+        // Live debug overlay: poll engine stats once a second.
+        val settings by vm.settings.collectAsState()
+        if (settings.showDebugOverlay && call.connected) {
+            var stats by remember { mutableStateOf("") }
+            LaunchedEffect(call.active) {
+                while (call.active) {
+                    stats = vm.engine.videoDebugStats()
+                    kotlinx.coroutines.delay(1000)
+                }
+            }
+            Text(
+                stats,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+            )
+        }
 
         // Keep the screen awake for the whole call (video especially).
         val view = LocalView.current

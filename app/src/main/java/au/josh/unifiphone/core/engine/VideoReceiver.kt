@@ -23,6 +23,8 @@ class VideoReceiver(private val rtp: RtpSession) {
     private val queue = LinkedBlockingQueue<ByteArray>(60)
     private var seenKeyframe = false
     private var lastPliMs = 0L
+    @Volatile var framesDecoded = 0L; private set
+    @Volatile var auReceived = 0L; private set
 
     private val depacketizer = H265Rtp.Depacketizer(
         onAccessUnit = { data, keyframe ->
@@ -60,6 +62,8 @@ class VideoReceiver(private val rtp: RtpSession) {
 
     fun onRtpVideo(seq: Int, marker: Boolean, payload: ByteArray) {
         if (!running.get()) return
+        auReceived++
+        if (auReceived == 1L) EngineLog.d("VIDEO-RX: first RTP video packet arrived")
         depacketizer.push(seq, marker, payload)
     }
 
@@ -134,6 +138,8 @@ class VideoReceiver(private val rtp: RtpSession) {
         while (true) {
             val outIdx = try { c.dequeueOutputBuffer(info, 0) } catch (_: Exception) { return }
             if (outIdx < 0) return
+            framesDecoded++
+            if (framesDecoded == 1L) EngineLog.d("VIDEO-RX: first frame DECODED + rendered")
             c.releaseOutputBuffer(outIdx, true) // render to surface
         }
     }

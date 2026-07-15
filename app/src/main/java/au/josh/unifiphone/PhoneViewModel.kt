@@ -24,6 +24,26 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app) {
     fun updateSettings(transform: (AppSettings) -> AppSettings) =
         viewModelScope.launch { settingsRepo.update(transform) }
 
+    /** Write current settings to a JSON file in external files dir; returns path. */
+    fun exportSettings(): String {
+        val dir = application.getExternalFilesDir(null) ?: application.filesDir
+        val f = java.io.File(dir, "unifiphone-settings-backup.json")
+        f.writeText(settings.value.toBackupJson())
+        return f.absolutePath
+    }
+
+    /** Restore settings from the backup file if present; returns success. */
+    fun importSettings(): Boolean {
+        val dir = application.getExternalFilesDir(null) ?: application.filesDir
+        val f = java.io.File(dir, "unifiphone-settings-backup.json")
+        if (!f.exists()) return false
+        return runCatching {
+            val restored = appSettingsFromBackupJson(f.readText(), settings.value)
+            viewModelScope.launch { settingsRepo.update { restored } }
+            true
+        }.getOrDefault(false)
+    }
+
     fun saveEntry(entry: DirectoryEntry) = viewModelScope.launch { directory.upsert(entry) }
     fun deleteEntry(id: String) = viewModelScope.launch { directory.delete(id) }
     fun clearHistory() = viewModelScope.launch { directory.clearHistory() }

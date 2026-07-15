@@ -21,6 +21,11 @@ class RtpSession(
 ) {
     val ssrc: Long = Random.nextLong(1, 0xFFFFFFFFL)
 
+    // Diagnostics: packet counters, readable for the debug panel.
+    @Volatile var rxPackets = 0L; private set
+    @Volatile var txPackets = 0L; private set
+    @Volatile var rxBytes = 0L; private set
+
     private val rtpSocket = DatagramSocket(localRtpPort)
     private val rtcpSocket = DatagramSocket(localRtpPort + 1)
     private val running = AtomicBoolean(true)
@@ -81,6 +86,7 @@ class RtpSession(
         pkt[8] = (ssrc shr 24).toByte(); pkt[9] = (ssrc shr 16).toByte()
         pkt[10] = (ssrc shr 8).toByte(); pkt[11] = ssrc.toByte()
         System.arraycopy(payload, 0, pkt, 12, payload.size)
+        txPackets++
         runCatching { rtpSocket.send(DatagramPacket(pkt, pkt.size, addr, remoteRtpPort)) }
     }
 
@@ -133,6 +139,7 @@ class RtpSession(
             offset += 4 + extLen * 4
         }
         if (offset >= len) return
+        rxPackets++; rxBytes += (len - offset)
         onPacket(pt, marker, seqNum, ts, buf.copyOfRange(offset, len))
     }
 

@@ -335,6 +335,18 @@ class SipEngine(
     }
 
     /** CallScreen hands us the SurfaceView surface for remote video. */
+    /** Live one-line media stats for the on-screen debug overlay. */
+    fun videoDebugStats(): String {
+        val vr = videoRtp
+        val rx = videoRx
+        val a = audioRtp
+        return buildString {
+            append("aud rx=${a?.rxPackets ?: 0} tx=${a?.txPackets ?: 0}  ")
+            append("vid rx=${vr?.rxPackets ?: 0} tx=${vr?.txPackets ?: 0}  ")
+            append("AU=${rx?.auReceived ?: 0} dec=${rx?.framesDecoded ?: 0}")
+        }
+    }
+
     fun attachRemoteVideoSurface(surface: Surface) {
         pendingRemoteSurface = surface
         videoRx?.attachSurface(surface)
@@ -414,6 +426,7 @@ class SipEngine(
                 // real media session for the winner. The ringing legs carried
                 // throwaway SDP ports (no media), so we set media up fresh here.
                 parallelRingActive = false
+                scope.launch { stopRingback() }  // answer received: kill ringback tone
                 val losers = ringingDialogs.filter { it.callId != call.callId }
                 ringingDialogs.clear()
                 for (l in losers) {
@@ -499,6 +512,11 @@ class SipEngine(
 
     private fun buildVideoTuning(): VideoSender.Tuning {
         val s = currentSettings ?: return VideoSender.Tuning()
+        EngineLog.d(
+            "VIDEO-TX tuning: rot=${s.videoRotationOffset} mirror=${s.videoMirror} " +
+                "front=${s.videoUseFrontCamera} res=${s.videoResolution} " +
+                "bitrate=${s.videoBitrateKbps} scale=${s.videoScaleMode}"
+        )
         return VideoSender.Tuning(
             rotationOffset = s.videoRotationOffset,
             extraMirror = s.videoMirror,
@@ -506,6 +524,7 @@ class SipEngine(
             resolutionShortEdge = s.videoResolution,
             bitrateKbps = s.videoBitrateKbps,
             scaleMode = s.videoScaleMode,
+            targetAspect = s.videoTargetAspect,
         )
     }
 

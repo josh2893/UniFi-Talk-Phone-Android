@@ -11,6 +11,51 @@ import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
 
+/** Serialize AppSettings to a flat JSON string for backup. */
+fun AppSettings.toBackupJson(): String {
+    val o = org.json.JSONObject()
+    o.put("sipServer", sipServer); o.put("sipPort", sipPort); o.put("sipDomain", sipDomain)
+    o.put("sipUsername", sipUsername); o.put("sipPassword", sipPassword)
+    o.put("transport", transport.name); o.put("phoneLabel", phoneLabel)
+    o.put("showMissedCalls", showMissedCalls); o.put("themeMode", themeMode.name)
+    o.put("kioskEnabled", kioskEnabled); o.put("ringtone", ringtone)
+    o.put("videoCalls", videoCalls); o.put("videoUpgradeDebug", videoUpgradeDebug)
+    o.put("videoRotationOffset", videoRotationOffset); o.put("videoMirror", videoMirror)
+    o.put("videoUseFrontCamera", videoUseFrontCamera); o.put("videoResolution", videoResolution)
+    o.put("videoBitrateKbps", videoBitrateKbps); o.put("videoScaleMode", videoScaleMode); o.put("videoTargetAspect", videoTargetAspect)
+    return o.toString(2)
+}
+
+/** Parse a backup JSON string into AppSettings, keeping defaults for missing keys. */
+fun appSettingsFromBackupJson(json: String, base: AppSettings = AppSettings()): AppSettings {
+    val o = org.json.JSONObject(json)
+    fun str(k: String, d: String) = if (o.has(k)) o.getString(k) else d
+    fun bool(k: String, d: Boolean) = if (o.has(k)) o.getBoolean(k) else d
+    fun int(k: String, d: Int) = if (o.has(k)) o.getInt(k) else d
+    return base.copy(
+        sipServer = str("sipServer", base.sipServer),
+        sipPort = str("sipPort", base.sipPort),
+        sipDomain = str("sipDomain", base.sipDomain),
+        sipUsername = str("sipUsername", base.sipUsername),
+        sipPassword = str("sipPassword", base.sipPassword),
+        transport = runCatching { Transport.valueOf(str("transport", base.transport.name)) }.getOrDefault(base.transport),
+        phoneLabel = str("phoneLabel", base.phoneLabel),
+        showMissedCalls = bool("showMissedCalls", base.showMissedCalls),
+        themeMode = runCatching { ThemeMode.valueOf(str("themeMode", base.themeMode.name)) }.getOrDefault(base.themeMode),
+        kioskEnabled = bool("kioskEnabled", base.kioskEnabled),
+        ringtone = str("ringtone", base.ringtone),
+        videoCalls = bool("videoCalls", base.videoCalls),
+        videoUpgradeDebug = bool("videoUpgradeDebug", base.videoUpgradeDebug),
+        videoRotationOffset = int("videoRotationOffset", base.videoRotationOffset),
+        videoMirror = bool("videoMirror", base.videoMirror),
+        videoUseFrontCamera = bool("videoUseFrontCamera", base.videoUseFrontCamera),
+        videoResolution = int("videoResolution", base.videoResolution),
+        videoBitrateKbps = int("videoBitrateKbps", base.videoBitrateKbps),
+        videoScaleMode = str("videoScaleMode", base.videoScaleMode),
+        videoTargetAspect = str("videoTargetAspect", base.videoTargetAspect),
+    )
+}
+
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 enum class Transport { UDP, TCP, TLS }
 
@@ -64,6 +109,11 @@ data class AppSettings(
     // Scale/crop mode for how the camera frame fills the encoded frame.
     // "fit" = letterbox (whole frame, bars), "fill" = center-crop (fills, trims).
     val videoScaleMode: String = "fill",
+    // Target aspect of the ENCODED frame: "source" (camera), "9:16", "3:4", "1:1".
+    // Cropping the 4:3 sensor to a portrait aspect stops the handset stretching it.
+    val videoTargetAspect: String = "source",
+    // Show a live stats overlay (packet/frame counters) during calls.
+    val showDebugOverlay: Boolean = false,
 )
 
 class SettingsRepository(private val context: Context) {
@@ -88,6 +138,8 @@ class SettingsRepository(private val context: Context) {
         val VIDEO_RES = androidx.datastore.preferences.core.intPreferencesKey("video_resolution")
         val VIDEO_BITRATE = androidx.datastore.preferences.core.intPreferencesKey("video_bitrate")
         val VIDEO_SCALE = stringPreferencesKey("video_scale_mode")
+        val VIDEO_ASPECT = stringPreferencesKey("video_target_aspect")
+        val DEBUG_OVERLAY = booleanPreferencesKey("debug_overlay")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -113,6 +165,8 @@ class SettingsRepository(private val context: Context) {
             videoResolution = p[Keys.VIDEO_RES] ?: 0,
             videoBitrateKbps = p[Keys.VIDEO_BITRATE] ?: 800,
             videoScaleMode = p[Keys.VIDEO_SCALE] ?: "fill",
+            videoTargetAspect = p[Keys.VIDEO_ASPECT] ?: "source",
+            showDebugOverlay = p[Keys.DEBUG_OVERLAY] ?: false,
         )
     }
 
@@ -140,6 +194,8 @@ class SettingsRepository(private val context: Context) {
             p[Keys.VIDEO_RES] = next.videoResolution
             p[Keys.VIDEO_BITRATE] = next.videoBitrateKbps
             p[Keys.VIDEO_SCALE] = next.videoScaleMode
+            p[Keys.VIDEO_ASPECT] = next.videoTargetAspect
+            p[Keys.DEBUG_OVERLAY] = next.showDebugOverlay
         }
     }
 }

@@ -165,7 +165,35 @@ fun SettingsScreen(vm: PhoneViewModel) {
             )
         }
 
+        SectionCard("Backup") {
+            var msg by remember { mutableStateOf<String?>(null) }
+            StepperRow(label = "Export settings", value = "Save") {
+                val path = vm.exportSettings()
+                msg = "Saved to: $path"
+            }
+            StepperRow(label = "Restore settings", value = "Load") {
+                msg = if (vm.importSettings()) "Restored from backup" else "No backup file found"
+            }
+            msg?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text(
+                "Backup is written to the app's external files dir, which SURVIVES " +
+                    "uninstall only if you copy it off first. Export before uninstalling, " +
+                    "then Restore after reinstalling.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
         SectionCard("Debug / experiments") {
+            ToggleRow(
+                title = "Live stats overlay",
+                subtitle = "Show RTP packet + decoded-frame counters during a call",
+                checked = settings.showDebugOverlay,
+                onChange = { vm.updateSettings { s -> s.copy(showDebugOverlay = it) } },
+            )
             ToggleRow(
                 title = "Mid-call video upgrade",
                 subtitle = "Adds an \"Add video\" button to connected audio-only calls. " +
@@ -227,6 +255,16 @@ fun SettingsScreen(vm: PhoneViewModel) {
                 onTap = {
                     val next = if (settings.videoScaleMode == "fill") "fit" else "fill"
                     vm.updateSettings { s -> s.copy(videoScaleMode = next) }
+                },
+            )
+            StepperRow(
+                label = "Target aspect",
+                value = settings.videoTargetAspect,
+                onTap = {
+                    val opts = listOf("source", "9:16", "3:4", "1:1")
+                    val idx = opts.indexOf(settings.videoTargetAspect).let { if (it < 0) 0 else it }
+                    val next = opts[(idx + 1) % opts.size]
+                    vm.updateSettings { s -> s.copy(videoTargetAspect = next) }
                 },
             )
             Text(
