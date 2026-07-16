@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.filled.CallMissed
 import androidx.compose.material.icons.automirrored.filled.CallReceived
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -91,8 +92,11 @@ fun HistoryScreen(vm: PhoneViewModel) {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            IconButton(onClick = { vm.engine.dial(rec.number) }) {
-                                Icon(Icons.Filled.Call, "Call back", tint = MaterialTheme.colorScheme.primary)
+                            IconButton(onClick = { vm.engine.dial(rec.number, videoOverride = false) }) {
+                                Icon(Icons.Filled.Call, "Voice call back", tint = MaterialTheme.colorScheme.primary)
+                            }
+                            IconButton(onClick = { vm.engine.dial(rec.number, videoOverride = true) }) {
+                                Icon(Icons.Filled.Videocam, "Video call back", tint = MaterialTheme.colorScheme.primary)
                             }
                         }
                     }

@@ -141,7 +141,7 @@ class SipEngine(
 
     // ---- Call control -------------------------------------------------
 
-    fun dial(rawTarget: String) {
+    fun dial(rawTarget: String, videoOverride: Boolean? = null) {
         val s = currentSettings ?: return
         val client = sip ?: return
         if (rawTarget.isBlank() || dialog != null || parallelRingActive) return
@@ -153,13 +153,13 @@ class SipEngine(
         val targets = rawTarget.split(',', ';', ' ')
             .map { it.trim() }.filter { it.isNotEmpty() }
 
+        val withVideo = videoOverride ?: s.videoCalls
         if (targets.size > 1) {
-            dialParallel(targets, s, client)
+            dialParallel(targets, s, client, withVideo)
             return
         }
 
         val target = targets.firstOrNull() ?: return
-        val withVideo = s.videoCalls
         setupMedia(video = withVideo)
         val sdp = Sdp.build(
             localIp = client.localIp,
@@ -186,13 +186,12 @@ class SipEngine(
      * its own RTP ports (they must be distinct), but no media is started until
      * one of them answers.
      */
-    private fun dialParallel(targets: List<String>, s: AppSettings, client: SipClient) {
+    private fun dialParallel(targets: List<String>, s: AppSettings, client: SipClient, withVideo: Boolean) {
         parallelRingActive = true
         callWasIncoming = false
         callAnsweredAt = 0L
         ringingDialogs.clear()
 
-        val withVideo = s.videoCalls
         for (t in targets) {
             // Allocate throwaway ports per leg so the SDPs are valid and distinct.
             val aPort = RtpSession.allocatePortPair()

@@ -17,9 +17,16 @@ import java.util.UUID
  *  SPEED_DIAL - pinned to the home screen for one-tap dialling
  *  PAGE       - paging target; dialled as *0*<extension> per UniFi Talk's
  *               paging feature code (page a group extension)
+ *  GROUP_VIDEO - named list of extensions dialled as one comma-separated video call
  */
 @Serializable
-enum class EntryType { CONTACT, SPEED_DIAL, PAGE }
+enum class EntryType { CONTACT, SPEED_DIAL, PAGE, GROUP_VIDEO }
+
+@Serializable
+data class GroupVideoMember(
+    val label: String = "",
+    val number: String = "",
+)
 
 @Serializable
 data class DirectoryEntry(
@@ -27,10 +34,14 @@ data class DirectoryEntry(
     val name: String,
     val number: String,          // extension or full number; for PAGE: the group extension only
     val type: EntryType = EntryType.CONTACT,
+    val groupMembers: List<GroupVideoMember> = emptyList(),
 ) {
     /** The string actually sent to the PBX. */
     fun dialString(): String = when (type) {
         EntryType.PAGE -> "*0*$number"
+        EntryType.GROUP_VIDEO -> groupMembers.map { it.number.trim() }
+            .filter { it.isNotEmpty() }
+            .joinToString(",")
         else -> number
     }
 }

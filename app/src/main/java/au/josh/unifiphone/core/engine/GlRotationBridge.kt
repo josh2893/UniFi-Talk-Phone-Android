@@ -130,7 +130,7 @@ class GlRotationBridge(
 
             EGL14.eglMakeCurrent(eglDisplay, encoderEglSurface, encoderEglSurface, eglContext)
             GLES20.glViewport(0, 0, outWidth, outHeight)
-            drawCurrentTexture()
+            drawCurrentTexture(outWidth, outHeight, applyStretchFix = true)
             android.opengl.EGLExt.eglPresentationTimeANDROID(
                 eglDisplay, encoderEglSurface, st.timestamp
             )
@@ -139,7 +139,7 @@ class GlRotationBridge(
             if (previewEglSurface != EGL14.EGL_NO_SURFACE && previewWidth > 0 && previewHeight > 0) {
                 EGL14.eglMakeCurrent(eglDisplay, previewEglSurface, previewEglSurface, eglContext)
                 GLES20.glViewport(0, 0, previewWidth, previewHeight)
-                drawCurrentTexture()
+                drawCurrentTexture(previewWidth, previewHeight, applyStretchFix = false)
                 android.opengl.EGLExt.eglPresentationTimeANDROID(
                     eglDisplay, previewEglSurface, st.timestamp
                 )
@@ -150,7 +150,7 @@ class GlRotationBridge(
         }
     }
 
-    private fun drawCurrentTexture() {
+    private fun drawCurrentTexture(dstWidthPx: Int, dstHeightPx: Int, applyStretchFix: Boolean) {
             GLES20.glClearColor(0f, 0f, 0f, 1f)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
@@ -167,7 +167,7 @@ class GlRotationBridge(
             // (letterbox bars).
             val srcAspect = srcWidth.toFloat() / srcHeight
             val dstAspect = if (rotationDegrees % 180 == 0)
-                outWidth.toFloat() / outHeight else outHeight.toFloat() / outWidth
+                dstWidthPx.toFloat() / dstHeightPx else dstHeightPx.toFloat() / dstWidthPx
             if (srcAspect > 0f && dstAspect > 0f) {
                 val ratio = srcAspect / dstAspect
                 val (sx, sy) = if (scaleFill) {
@@ -177,7 +177,7 @@ class GlRotationBridge(
                 }
                 Matrix.scaleM(mvpMatrix, 0, sx, sy, 1f)
             }
-            val stretchFix = stretchFixPercent.coerceIn(40, 140) / 100f
+            val stretchFix = if (applyStretchFix) stretchFixPercent.coerceIn(40, 140) / 100f else 1f
             if (stretchFix != 1f) {
                 val compensation = FloatArray(16)
                 val adjusted = FloatArray(16)

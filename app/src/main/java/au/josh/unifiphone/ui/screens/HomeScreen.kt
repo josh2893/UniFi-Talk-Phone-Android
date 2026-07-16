@@ -15,6 +15,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Icon
@@ -45,9 +47,21 @@ fun HomeScreen(vm: PhoneViewModel) {
     val regState by vm.engine.regState.collectAsState()
     val regDetail by vm.engine.regDetail.collectAsState()
     val entries by vm.directory.entries.collectAsState()
+    val history by vm.directory.history.collectAsState()
     var number by rememberSaveable { mutableStateOf("") }
 
     val quickDials = entries.filter { it.type != EntryType.CONTACT }
+    val lastNumber = history.firstOrNull { it.number.isNotBlank() }?.number
+
+    fun dialOrRecall(video: Boolean) {
+        val target = number.trim()
+        if (target.isBlank()) {
+            lastNumber?.let { number = it }
+            return
+        }
+        vm.engine.dial(target, videoOverride = video)
+        number = ""
+    }
 
     Column(
         modifier = Modifier
@@ -86,22 +100,38 @@ fun HomeScreen(vm: PhoneViewModel) {
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 items(quickDials, key = { it.id }) { entry ->
-                    AssistChip(
-                        onClick = { vm.engine.dial(entry.dialString()) },
-                        label = { Text(entry.name) },
-                        leadingIcon = {
-                            Icon(
-                                imageVector = if (entry.type == EntryType.PAGE)
-                                    Icons.Filled.Campaign else Icons.Filled.Call,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        },
-                        colors = AssistChipDefaults.assistChipColors(
-                            containerColor = MaterialTheme.colorScheme.surface,
-                        ),
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val groupVideo = entry.type == EntryType.GROUP_VIDEO
+                        AssistChip(
+                            onClick = { vm.engine.dial(entry.dialString(), videoOverride = groupVideo) },
+                            label = { Text(entry.name) },
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = when (entry.type) {
+                                        EntryType.PAGE -> Icons.Filled.Campaign
+                                        EntryType.GROUP_VIDEO -> Icons.Filled.Videocam
+                                        EntryType.SPEED_DIAL -> Icons.Filled.Star
+                                        EntryType.CONTACT -> Icons.Filled.Call
+                                    },
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            },
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                            ),
+                        )
+                        if (entry.type != EntryType.PAGE && entry.type != EntryType.GROUP_VIDEO) {
+                            IconButton(onClick = { vm.engine.dial(entry.dialString(), videoOverride = true) }) {
+                                Icon(
+                                    Icons.Filled.Videocam,
+                                    "Video call ${entry.name}",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -138,13 +168,13 @@ fun HomeScreen(vm: PhoneViewModel) {
         Keypad(onKey = { number += it })
         Spacer(Modifier.height(20.dp))
 
-        RoundActionButton(background = SuccessGreen, onClick = {
-            if (number.isNotBlank()) {
-                vm.engine.dial(number)
-                number = ""
+        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+            RoundActionButton(background = SuccessGreen, onClick = { dialOrRecall(video = false) }) {
+                Icon(Icons.Filled.Call, contentDescription = "Voice call", tint = androidx.compose.ui.graphics.Color.White)
             }
-        }) {
-            Icon(Icons.Filled.Call, contentDescription = "Call", tint = androidx.compose.ui.graphics.Color.White)
+            RoundActionButton(background = MaterialTheme.colorScheme.primary, onClick = { dialOrRecall(video = true) }) {
+                Icon(Icons.Filled.Videocam, contentDescription = "Video call", tint = androidx.compose.ui.graphics.Color.White)
+            }
         }
         Spacer(Modifier.height(8.dp))
     }

@@ -18,6 +18,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Dialpad
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Pause
@@ -65,6 +67,7 @@ import kotlin.math.roundToInt
 fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
     var showDtmf by remember { mutableStateOf(false) }
     var showSelfView by remember { mutableStateOf(true) }
+    var fullScreen by remember { mutableStateOf(false) }
     var selfOffsetX by remember { mutableStateOf(0f) }
     var selfOffsetY by remember { mutableStateOf(0f) }
     var elapsed by remember { mutableLongStateOf(0L) }
@@ -77,14 +80,23 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
     }
 
     val videoOn = call.videoActive && call.connected
+    val settings by vm.settings.collectAsState()
 
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+    ) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 24.dp, vertical = if (videoOn) 12.dp else 24.dp),
+            .padding(
+                horizontal = if (fullScreen) 0.dp else 24.dp,
+                vertical = if (fullScreen) 0.dp else if (videoOn) 12.dp else 24.dp,
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        if (!fullScreen) {
         Spacer(Modifier.height(if (videoOn) 8.dp else 48.dp))
         Text(
             text = call.remoteName ?: call.remoteNumber,
@@ -100,7 +112,7 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
         Spacer(Modifier.height(8.dp))
         Text(
             text = when {
-                call.incoming -> "Incoming call"
+                call.incoming -> if (call.videoActive) "Incoming video call" else "Incoming voice call"
                 call.onHold -> "On hold"
                 call.connected -> "%d:%02d".format(elapsed / 60, elapsed % 60)
                 else -> "Calling…"
@@ -108,10 +120,10 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
             color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.Medium,
         )
+        }
 
         // Live debug overlay: poll engine stats once a second.
-        val settings by vm.settings.collectAsState()
-        if (settings.showDebugOverlay && call.connected) {
+        if (!fullScreen && settings.showDebugOverlay && call.connected) {
             var stats by remember { mutableStateOf("") }
             LaunchedEffect(call.active) {
                 while (call.active) {
@@ -135,12 +147,12 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
         }
 
         if (videoOn) {
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(if (fullScreen) 0.dp else 12.dp))
             Box(
                 Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .clip(RoundedCornerShape(16.dp)),
+                    .clip(RoundedCornerShape(if (fullScreen) 0.dp else 16.dp)),
             ) {
                 AndroidView(
                     factory = { ctx ->
@@ -167,75 +179,6 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
                     update = { applyReceiveStretchFix(it, settings.videoReceiveStretchFixPercent) },
                     modifier = Modifier.fillMaxSize(),
                 )
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(12.dp),
-                ) {
-                    RoundActionButton(
-                        background = if (showSelfView) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.surfaceVariant,
-                        onClick = { showSelfView = !showSelfView },
-                        size = 44,
-                    ) {
-                        Icon(
-                            Icons.Filled.Videocam,
-                            "Self view",
-                            tint = if (showSelfView) Color.White else MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-                }
-                if (showSelfView) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(12.dp)
-                            .offset { IntOffset(selfOffsetX.roundToInt(), selfOffsetY.roundToInt()) }
-                            .width(124.dp)
-                            .aspectRatio(9f / 16f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.Black)
-                            .pointerInput(Unit) {
-                                detectDragGestures { _, drag ->
-                                    selfOffsetX += drag.x
-                                    selfOffsetY += drag.y
-                                }
-                            },
-                    ) {
-                        AndroidView(
-                            factory = { ctx ->
-                                val textureView = TextureView(ctx)
-                                textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                                    private var previewSurface: Surface? = null
-                                    override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
-                                        previewSurface = Surface(st).also {
-                                            vm.engine.attachLocalPreviewSurface(it, w, h)
-                                        }
-                                    }
-                                    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
-                                        previewSurface?.let {
-                                            vm.engine.attachLocalPreviewSurface(it, w, h)
-                                        }
-                                    }
-                                    override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
-                                        vm.engine.attachLocalPreviewSurface(null, 0, 0)
-                                        previewSurface?.release()
-                                        previewSurface = null
-                                        return true
-                                    }
-                                    override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
-                                }
-                                textureView
-                            },
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                } else {
-                    DisposableEffect(Unit) {
-                        vm.engine.attachLocalPreviewSurface(null, 0, 0)
-                        onDispose {}
-                    }
-                }
                 if (showDtmf) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
                         Box(Modifier.background(Color.Black.copy(alpha = 0.6f))) {
@@ -244,12 +187,12 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
                     }
                 }
             }
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(if (fullScreen) 0.dp else 12.dp))
         } else {
             Spacer(Modifier.weight(1f))
         }
 
-        if (call.incoming) {
+        if (!fullScreen && call.incoming) {
             Row(horizontalArrangement = Arrangement.spacedBy(64.dp)) {
                 RoundActionButton(background = DangerRed, onClick = { vm.engine.decline() }, size = 76) {
                     Icon(Icons.Filled.CallEnd, "Decline", tint = Color.White)
@@ -258,7 +201,7 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
                     Icon(Icons.Filled.Call, "Answer", tint = Color.White)
                 }
             }
-        } else {
+        } else if (!fullScreen) {
             if (showDtmf && !videoOn) {
                 Keypad(compact = true, onKey = { vm.engine.sendDtmf(it) })
                 Spacer(Modifier.height(20.dp))
@@ -281,16 +224,18 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
                 )
                 Spacer(Modifier.height(12.dp))
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(if (videoOn) 12.dp else 20.dp)) {
                 ToggleCallButton(
                     active = call.muted,
                     icon = { Icon(if (call.muted) Icons.Filled.MicOff else Icons.Filled.Mic, "Mute", tint = it) },
                     onClick = { vm.engine.toggleMute() },
+                    size = if (videoOn) 50 else 60,
                 )
                 ToggleCallButton(
                     active = showDtmf,
                     icon = { Icon(Icons.Filled.Dialpad, "Keypad", tint = it) },
                     onClick = { showDtmf = !showDtmf },
+                    size = if (videoOn) 50 else 60,
                 )
                 ToggleCallButton(
                     active = call.onHold,
@@ -298,20 +243,107 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
                         Icon(if (call.onHold) Icons.Filled.PlayArrow else Icons.Filled.Pause, "Hold", tint = it)
                     },
                     onClick = { vm.engine.toggleHold() },
+                    size = if (videoOn) 50 else 60,
                 )
                 ToggleCallButton(
                     active = call.speaker,
                     icon = { Icon(Icons.Filled.VolumeUp, "Speaker", tint = it) },
                     onClick = { vm.engine.toggleSpeaker() },
+                    size = if (videoOn) 50 else 60,
                 )
             }
-            Spacer(Modifier.height(28.dp))
-            RoundActionButton(background = DangerRed, onClick = { vm.engine.hangup() }, size = 76) {
+            Spacer(Modifier.height(if (videoOn) 16.dp else 28.dp))
+            RoundActionButton(background = DangerRed, onClick = { vm.engine.hangup() }, size = if (videoOn) 62 else 76) {
                 Icon(Icons.Filled.CallEnd, "End call", tint = Color.White)
             }
         }
-        Spacer(Modifier.height(if (videoOn) 12.dp else 40.dp))
+        Spacer(Modifier.height(if (fullScreen) 0.dp else if (videoOn) 12.dp else 40.dp))
     }
+    if (videoOn) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(10.dp),
+        ) {
+            RoundActionButton(
+                background = if (showSelfView) MaterialTheme.colorScheme.primary
+                else Color.Black.copy(alpha = 0.45f),
+                onClick = { showSelfView = !showSelfView },
+                size = 40,
+            ) {
+                Icon(Icons.Filled.Videocam, "Self view", tint = Color.White)
+            }
+            RoundActionButton(
+                background = Color.Black.copy(alpha = 0.45f),
+                onClick = { fullScreen = !fullScreen },
+                size = 40,
+            ) {
+                Icon(
+                    if (fullScreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                    "Fullscreen",
+                    tint = Color.White,
+                )
+            }
+        }
+        if (showSelfView) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(12.dp)
+                    .offset { IntOffset(selfOffsetX.roundToInt(), selfOffsetY.roundToInt()) }
+                    .width(132.dp)
+                    .aspectRatio(9f / 16f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black)
+                    .pointerInput(Unit) {
+                        detectDragGestures { _, drag ->
+                            selfOffsetX += drag.x
+                            selfOffsetY += drag.y
+                        }
+                    },
+            ) {
+                SelfView(vm)
+            }
+        } else {
+            DisposableEffect(Unit) {
+                vm.engine.attachLocalPreviewSurface(null, 0, 0)
+                onDispose {}
+            }
+        }
+    }
+    }
+}
+
+@Composable
+private fun SelfView(vm: PhoneViewModel) {
+    AndroidView(
+        factory = { ctx ->
+            val textureView = TextureView(ctx)
+            textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                private var previewSurface: Surface? = null
+                override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                    previewSurface = Surface(st).also {
+                        vm.engine.attachLocalPreviewSurface(it, w, h)
+                    }
+                }
+                override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
+                    previewSurface?.let {
+                        vm.engine.attachLocalPreviewSurface(it, w, h)
+                    }
+                }
+                override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                    vm.engine.attachLocalPreviewSurface(null, 0, 0)
+                    previewSurface?.release()
+                    previewSurface = null
+                    return true
+                }
+                override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+            }
+            textureView
+        },
+        modifier = Modifier.fillMaxSize(),
+    )
 }
 
 @Composable
@@ -319,11 +351,12 @@ private fun ToggleCallButton(
     active: Boolean,
     icon: @Composable (tint: Color) -> Unit,
     onClick: () -> Unit,
+    size: Int = 60,
 ) {
     val bg = if (active) MaterialTheme.colorScheme.primary
     else MaterialTheme.colorScheme.surfaceVariant
     val tint = if (active) Color.White else MaterialTheme.colorScheme.onSurface
-    RoundActionButton(background = bg, onClick = onClick, size = 60) { icon(tint) }
+    RoundActionButton(background = bg, onClick = onClick, size = size) { icon(tint) }
 }
 
 private fun applyReceiveStretchFix(view: TextureView, percent: Int) {
