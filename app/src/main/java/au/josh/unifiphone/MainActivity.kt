@@ -3,6 +3,7 @@ package au.josh.unifiphone
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
@@ -16,6 +17,7 @@ import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Dialpad
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -25,11 +27,14 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -37,11 +42,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import au.josh.unifiphone.core.SipForegroundService
 import au.josh.unifiphone.data.ThemeMode
 import au.josh.unifiphone.kiosk.KioskManager
 import au.josh.unifiphone.ui.screens.CallScreen
 import au.josh.unifiphone.ui.screens.ContactsScreen
+import au.josh.unifiphone.ui.screens.DoorbellScreen
 import au.josh.unifiphone.ui.screens.HistoryScreen
 import au.josh.unifiphone.ui.screens.HomeScreen
 import au.josh.unifiphone.ui.screens.SettingsScreen
@@ -79,10 +88,23 @@ class MainActivity : ComponentActivity() {
             val vm: PhoneViewModel = viewModel()
             val settings by vm.settings.collectAsState()
 
-            val dark = when (settings.themeMode) {
+            val dark = settings.doorbellEnabled || when (settings.themeMode) {
                 ThemeMode.DARK -> true
                 ThemeMode.LIGHT -> false
                 ThemeMode.SYSTEM -> isSystemInDarkTheme()
+            }
+
+            LaunchedEffect(settings.doorbellEnabled) {
+                val insets = WindowCompat.getInsetsController(window, window.decorView)
+                if (settings.doorbellEnabled) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    insets.hide(WindowInsetsCompat.Type.systemBars())
+                    insets.systemBarsBehavior =
+                        WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    insets.show(WindowInsetsCompat.Type.systemBars())
+                }
             }
 
             // Keep the system status/navigation bars in step with the theme.
@@ -101,7 +123,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            UniFiPhoneTheme(mode = settings.themeMode) {
+            UniFiPhoneTheme(mode = if (settings.doorbellEnabled) ThemeMode.DARK else settings.themeMode) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     Root(vm)
                 }
@@ -113,11 +135,44 @@ class MainActivity : ComponentActivity() {
 private data class Tab(val label: String, val icon: @Composable () -> Unit)
 
 @Composable
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 private fun Root(vm: PhoneViewModel) {
     val call by vm.engine.callState.collectAsState()
     val settings by vm.settings.collectAsState()
     val history by vm.directory.history.collectAsState()
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    var doorbellAdminOpen by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(settings.doorbellEnabled) {
+        if (!settings.doorbellEnabled) doorbellAdminOpen = false
+    }
+
+    if (settings.doorbellEnabled) {
+        if (call.active && call.incoming) {
+            CallScreen(vm, call)
+        } else if (!doorbellAdminOpen || call.active) {
+            DoorbellScreen(vm, onAdminUnlocked = { doorbellAdminOpen = true })
+        } else {
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                topBar = {
+                    TopAppBar(
+                        title = { Text("Settings") },
+                        navigationIcon = {
+                            IconButton(onClick = { doorbellAdminOpen = false }) {
+                                Icon(Icons.Filled.ArrowBack, contentDescription = "Back to doorbell")
+                            }
+                        },
+                    )
+                },
+            ) { padding ->
+                androidx.compose.foundation.layout.Box(Modifier.padding(padding)) {
+                    SettingsScreen(vm, initialTab = 1)
+                }
+            }
+        }
+        return
+    }
 
     if (call.active) {
         // Full-screen call UI takes over whenever there's a call

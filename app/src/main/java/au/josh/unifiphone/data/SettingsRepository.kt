@@ -26,6 +26,13 @@ fun AppSettings.toBackupJson(): String {
     o.put("videoStretchFixPercent", videoStretchFixPercent)
     o.put("videoReceiveStretchFixPercent", videoReceiveStretchFixPercent)
     o.put("showDebugOverlay", showDebugOverlay)
+    o.put("doorbellEnabled", doorbellEnabled)
+    o.put("doorbellBanner", doorbellBanner); o.put("doorbellTitle", doorbellTitle)
+    o.put("doorbellAddress", doorbellAddress); o.put("doorbellInstruction", doorbellInstruction)
+    o.put("doorbellTarget", doorbellTarget); o.put("doorbellAdminPin", doorbellAdminPin)
+    o.put("doorbellChimeUntilCallEnds", doorbellChimeUntilCallEnds)
+    o.put("doorbellChimeCount", doorbellChimeCount)
+    o.put("doorbellNoAnswerMessage", doorbellNoAnswerMessage)
     return o.toString(2)
 }
 
@@ -59,6 +66,16 @@ fun appSettingsFromBackupJson(json: String, base: AppSettings = AppSettings()): 
         videoStretchFixPercent = int("videoStretchFixPercent", base.videoStretchFixPercent),
         videoReceiveStretchFixPercent = int("videoReceiveStretchFixPercent", base.videoReceiveStretchFixPercent),
         showDebugOverlay = bool("showDebugOverlay", base.showDebugOverlay),
+        doorbellEnabled = bool("doorbellEnabled", base.doorbellEnabled),
+        doorbellBanner = str("doorbellBanner", base.doorbellBanner),
+        doorbellTitle = str("doorbellTitle", base.doorbellTitle),
+        doorbellAddress = str("doorbellAddress", base.doorbellAddress),
+        doorbellInstruction = str("doorbellInstruction", base.doorbellInstruction),
+        doorbellTarget = str("doorbellTarget", base.doorbellTarget),
+        doorbellAdminPin = str("doorbellAdminPin", base.doorbellAdminPin),
+        doorbellChimeUntilCallEnds = bool("doorbellChimeUntilCallEnds", base.doorbellChimeUntilCallEnds),
+        doorbellChimeCount = int("doorbellChimeCount", base.doorbellChimeCount),
+        doorbellNoAnswerMessage = str("doorbellNoAnswerMessage", base.doorbellNoAnswerMessage),
     )
 }
 
@@ -124,6 +141,19 @@ data class AppSettings(
     val videoReceiveStretchFixPercent: Int = 100,
     // Show a live stats overlay (packet/frame counters) during calls.
     val showDebugOverlay: Boolean = false,
+
+    // Dedicated wall-mounted doorbell experience.
+    val doorbellEnabled: Boolean = false,
+    val doorbellBanner: String = "WELCOME",
+    val doorbellTitle: String = "Front Door",
+    val doorbellAddress: String = "",
+    val doorbellInstruction: String = "Please press the button below to ring the doorbell.",
+    // One or more extensions separated by commas. Calls are always placed as video.
+    val doorbellTarget: String = "",
+    val doorbellAdminPin: String = "1234",
+    val doorbellChimeUntilCallEnds: Boolean = false,
+    val doorbellChimeCount: Int = 2,
+    val doorbellNoAnswerMessage: String = "Sorry, no one is available right now.",
 )
 
 class SettingsRepository(private val context: Context) {
@@ -152,6 +182,16 @@ class SettingsRepository(private val context: Context) {
         val VIDEO_STRETCH_FIX = androidx.datastore.preferences.core.intPreferencesKey("video_stretch_fix_percent")
         val VIDEO_RECEIVE_STRETCH_FIX = androidx.datastore.preferences.core.intPreferencesKey("video_receive_stretch_fix_percent")
         val DEBUG_OVERLAY = booleanPreferencesKey("debug_overlay")
+        val DOORBELL_ENABLED = booleanPreferencesKey("doorbell_enabled")
+        val DOORBELL_BANNER = stringPreferencesKey("doorbell_banner")
+        val DOORBELL_TITLE = stringPreferencesKey("doorbell_title")
+        val DOORBELL_ADDRESS = stringPreferencesKey("doorbell_address")
+        val DOORBELL_INSTRUCTION = stringPreferencesKey("doorbell_instruction")
+        val DOORBELL_TARGET = stringPreferencesKey("doorbell_target")
+        val DOORBELL_ADMIN_PIN = stringPreferencesKey("doorbell_admin_pin")
+        val DOORBELL_CHIME_UNTIL_END = booleanPreferencesKey("doorbell_chime_until_end")
+        val DOORBELL_CHIME_COUNT = androidx.datastore.preferences.core.intPreferencesKey("doorbell_chime_count")
+        val DOORBELL_NO_ANSWER = stringPreferencesKey("doorbell_no_answer_message")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -181,6 +221,18 @@ class SettingsRepository(private val context: Context) {
             videoStretchFixPercent = p[Keys.VIDEO_STRETCH_FIX] ?: 100,
             videoReceiveStretchFixPercent = p[Keys.VIDEO_RECEIVE_STRETCH_FIX] ?: 100,
             showDebugOverlay = p[Keys.DEBUG_OVERLAY] ?: false,
+            doorbellEnabled = p[Keys.DOORBELL_ENABLED] ?: false,
+            doorbellBanner = p[Keys.DOORBELL_BANNER] ?: "WELCOME",
+            doorbellTitle = p[Keys.DOORBELL_TITLE] ?: "Front Door",
+            doorbellAddress = p[Keys.DOORBELL_ADDRESS] ?: "",
+            doorbellInstruction = p[Keys.DOORBELL_INSTRUCTION]
+                ?: "Please press the button below to ring the doorbell.",
+            doorbellTarget = p[Keys.DOORBELL_TARGET] ?: "",
+            doorbellAdminPin = p[Keys.DOORBELL_ADMIN_PIN] ?: "1234",
+            doorbellChimeUntilCallEnds = p[Keys.DOORBELL_CHIME_UNTIL_END] ?: false,
+            doorbellChimeCount = p[Keys.DOORBELL_CHIME_COUNT] ?: 2,
+            doorbellNoAnswerMessage = p[Keys.DOORBELL_NO_ANSWER]
+                ?: "Sorry, no one is available right now.",
         )
     }
 
@@ -212,6 +264,16 @@ class SettingsRepository(private val context: Context) {
             p[Keys.VIDEO_STRETCH_FIX] = next.videoStretchFixPercent.coerceIn(40, 140)
             p[Keys.VIDEO_RECEIVE_STRETCH_FIX] = next.videoReceiveStretchFixPercent.coerceIn(40, 140)
             p[Keys.DEBUG_OVERLAY] = next.showDebugOverlay
+            p[Keys.DOORBELL_ENABLED] = next.doorbellEnabled
+            p[Keys.DOORBELL_BANNER] = next.doorbellBanner
+            p[Keys.DOORBELL_TITLE] = next.doorbellTitle
+            p[Keys.DOORBELL_ADDRESS] = next.doorbellAddress
+            p[Keys.DOORBELL_INSTRUCTION] = next.doorbellInstruction
+            p[Keys.DOORBELL_TARGET] = next.doorbellTarget
+            p[Keys.DOORBELL_ADMIN_PIN] = next.doorbellAdminPin
+            p[Keys.DOORBELL_CHIME_UNTIL_END] = next.doorbellChimeUntilCallEnds
+            p[Keys.DOORBELL_CHIME_COUNT] = next.doorbellChimeCount.coerceIn(1, 10)
+            p[Keys.DOORBELL_NO_ANSWER] = next.doorbellNoAnswerMessage
         }
     }
 }

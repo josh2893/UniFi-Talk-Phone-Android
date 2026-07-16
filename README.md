@@ -15,6 +15,22 @@ Not affiliated with Ubiquiti.
 - Three built-in ringtones + import your own audio file
 - Single-app **kiosk mode** via Lock Task (full lock when provisioned as Device Owner)
 - Foreground service keeps registration alive with the screen off
+- Dedicated doorbell mode with video group calling, visitor chime, animated call status,
+  PIN-protected settings, and an always-on wall display
+
+## Doorbell mode
+
+Open **Settings -> Doorbell** to configure the visitor banner, door or building name,
+address, destination extensions, chime playback, no-answer message, and settings PIN.
+The destination can be entered as comma-separated extensions or selected from a saved
+Group Video Call contact. Doorbell calls always offer H.265 video and ring every listed
+extension at once; the first phone to answer wins.
+
+Enable **Use this device as a doorbell** after saving the configuration. The visitor
+screen keeps the display awake, hides the Android system bars, and shows registration,
+time, ringing, answered, and no-answer states. During a connected doorbell call the
+app routes audio to the built-in speaker at full call volume, then restores the previous
+volume when the call ends. The default settings PIN is `1234`; change it before deployment.
 
 ## Build (produces the sideloadable APK)
 

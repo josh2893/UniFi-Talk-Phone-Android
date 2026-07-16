@@ -1,10 +1,12 @@
 package au.josh.unifiphone.core
 
 import android.content.Context
+import android.media.AudioDeviceInfo
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.ToneGenerator
+import android.os.Build
 import android.view.Surface
 import au.josh.unifiphone.core.engine.AudioStream
 import au.josh.unifiphone.core.engine.EngineLog
@@ -101,6 +103,7 @@ class SipEngine(
     private var ringbackTone: ToneGenerator? = null
     private val audioManager get() = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private var savedAlarmVolume: Int? = null
+    private var savedVoiceCallVolume: Int? = null
 
     private val _regState = MutableStateFlow(RegState.NONE)
     val regState: StateFlow<RegState> = _regState
@@ -115,8 +118,18 @@ class SipEngine(
     fun start() { /* stack starts on applySettings */ }
 
     fun applySettings(s: AppSettings) {
-        traceSip("### BUILD: v3.5 aspect-fix (encode matches capture aspect)")
+        val previous = currentSettings
         currentSettings = s
+        val sipConfigChanged = previous == null ||
+            previous.sipServer != s.sipServer ||
+            previous.sipPort != s.sipPort ||
+            previous.sipDomain != s.sipDomain ||
+            previous.sipUsername != s.sipUsername ||
+            previous.sipPassword != s.sipPassword ||
+            previous.transport != s.transport
+        if (!sipConfigChanged) return
+
+        traceSip("### BUILD: v3.6 doorbell-mode")
         sip?.stop(); sip = null
         if (s.sipServer.isBlank() || s.sipUsername.isBlank()) {
             _regState.value = RegState.NONE
@@ -605,6 +618,7 @@ class SipEngine(
 
     private fun startMedia(sendVideo: Boolean) {
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        if (currentSettings?.doorbellEnabled == true) applyDoorbellAudioRoute()
         audioRtp?.start()
         audio?.start()
         if (videoRtp != null) {
@@ -629,9 +643,44 @@ class SipEngine(
         runCatching { videoRtp?.close() }
         audio = null; videoTx = null; videoRx = null
         audioRtp = null; videoRtp = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            runCatching { audioManager.clearCommunicationDevice() }
+        }
         audioManager.mode = AudioManager.MODE_NORMAL
         @Suppress("DEPRECATION")
         audioManager.isSpeakerphoneOn = false
+        savedVoiceCallVolume?.let { previous ->
+            runCatching {
+                audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, previous, 0)
+            }
+            savedVoiceCallVolume = null
+        }
+    }
+
+    private fun applyDoorbellAudioRoute() {
+        if (savedVoiceCallVolume == null) {
+            savedVoiceCallVolume = runCatching {
+                audioManager.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
+            }.getOrNull()
+        }
+        runCatching {
+            val maximum = audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL)
+            audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, maximum, 0)
+        }
+        val routed = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            runCatching {
+                audioManager.availableCommunicationDevices
+                    .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                    ?.let { device -> audioManager.setCommunicationDevice(device) } == true
+            }.getOrDefault(false)
+        } else {
+            false
+        }
+        if (!routed) {
+            @Suppress("DEPRECATION")
+            runCatching { audioManager.isSpeakerphoneOn = true }
+        }
+        _callState.value = _callState.value.copy(speaker = true)
     }
 
     // ---- Ringing (unchanged behaviour from v1) ---------------------------
@@ -679,6 +728,8 @@ class SipEngine(
     }
 
     private fun startRingback() {
+        // Doorbell mode supplies its own visitor-facing chime.
+        if (currentSettings?.doorbellEnabled == true) return
         if (ringbackTone != null) return
         runCatching {
             ringbackTone = ToneGenerator(AudioManager.STREAM_VOICE_CALL, 70).also {

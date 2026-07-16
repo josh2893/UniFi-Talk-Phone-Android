@@ -5,6 +5,7 @@ import android.media.MediaPlayer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,20 +14,25 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -34,11 +40,15 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import au.josh.unifiphone.PhoneViewModel
+import au.josh.unifiphone.data.EntryType
 import au.josh.unifiphone.data.ThemeMode
 import au.josh.unifiphone.data.Transport
 import au.josh.unifiphone.kiosk.KioskManager
+import androidx.compose.runtime.saveable.rememberSaveable
 
 private val builtInTones = listOf(
     "raw:ringtone_classic" to "Classic",
@@ -47,7 +57,34 @@ private val builtInTones = listOf(
 )
 
 @Composable
-fun SettingsScreen(vm: PhoneViewModel) {
+fun SettingsScreen(vm: PhoneViewModel, initialTab: Int = 0) {
+    var selectedTab by rememberSaveable(initialTab) {
+        mutableIntStateOf(initialTab.coerceIn(0, 1))
+    }
+    Column(Modifier.fillMaxSize()) {
+        TabRow(selectedTabIndex = selectedTab) {
+            Tab(
+                selected = selectedTab == 0,
+                onClick = { selectedTab = 0 },
+                text = { Text("Phone") },
+            )
+            Tab(
+                selected = selectedTab == 1,
+                onClick = { selectedTab = 1 },
+                text = { Text("Doorbell") },
+            )
+        }
+        Box(Modifier.weight(1f)) {
+            when (selectedTab) {
+                0 -> PhoneSettingsContent(vm)
+                else -> DoorbellSettingsContent(vm)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PhoneSettingsContent(vm: PhoneViewModel) {
     val settings by vm.settings.collectAsState()
     val context = LocalContext.current
 
@@ -363,6 +400,187 @@ fun SettingsScreen(vm: PhoneViewModel) {
     }
 }
 
+@Composable
+private fun DoorbellSettingsContent(vm: PhoneViewModel) {
+    val settings by vm.settings.collectAsState()
+    val entries by vm.directory.entries.collectAsState()
+    val context = LocalContext.current
+
+    var banner by remember(settings.doorbellBanner) { mutableStateOf(settings.doorbellBanner) }
+    var title by remember(settings.doorbellTitle) { mutableStateOf(settings.doorbellTitle) }
+    var address by remember(settings.doorbellAddress) { mutableStateOf(settings.doorbellAddress) }
+    var instruction by remember(settings.doorbellInstruction) { mutableStateOf(settings.doorbellInstruction) }
+    var target by remember(settings.doorbellTarget) { mutableStateOf(settings.doorbellTarget) }
+    var pin by remember(settings.doorbellAdminPin) { mutableStateOf(settings.doorbellAdminPin) }
+    var noAnswer by remember(settings.doorbellNoAnswerMessage) {
+        mutableStateOf(settings.doorbellNoAnswerMessage)
+    }
+    val videoGroups = entries.filter { it.type == EntryType.GROUP_VIDEO }
+
+    fun saveDoorbellFields(enabled: Boolean = settings.doorbellEnabled) {
+        vm.updateSettings {
+            it.copy(
+                doorbellEnabled = enabled,
+                doorbellBanner = banner.trim(),
+                doorbellTitle = title.trim().ifBlank { "Front Door" },
+                doorbellAddress = address.trim(),
+                doorbellInstruction = instruction.trim().ifBlank {
+                    "Please press the button below to ring the doorbell."
+                },
+                doorbellTarget = target.split(',', ';', ' ')
+                    .map { it.trim() }.filter { it.isNotEmpty() }.joinToString(","),
+                doorbellAdminPin = pin.filter(Char::isDigit).take(8).ifBlank { "1234" },
+                doorbellNoAnswerMessage = noAnswer.trim().ifBlank {
+                    "Sorry, no one is available right now."
+                },
+            )
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SectionCard("Display") {
+            OutlinedTextField(
+                value = banner,
+                onValueChange = { banner = it },
+                label = { Text("Message / banner") },
+                supportingText = { Text("A short greeting shown above the door name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                label = { Text("Door or building name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = address,
+                onValueChange = { address = it },
+                label = { Text("Building / house address") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = instruction,
+                onValueChange = { instruction = it },
+                label = { Text("Visitor instruction") },
+                minLines = 2,
+                maxLines = 3,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        SectionCard("Video call destination") {
+            OutlinedTextField(
+                value = target,
+                onValueChange = { target = it },
+                label = { Text("Extensions") },
+                supportingText = { Text("Separate several extensions with commas, e.g. 10,11,12") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (videoGroups.isNotEmpty()) {
+                Text("Use a saved group video call", style = MaterialTheme.typography.labelLarge)
+                videoGroups.forEach { group ->
+                    FilterChip(
+                        selected = target == group.dialString(),
+                        onClick = { target = group.dialString() },
+                        label = { Text("${group.name}  ${group.dialString()}") },
+                    )
+                }
+            }
+            Text(
+                "Doorbell calls always use video. When several extensions are entered, " +
+                    "they ring at the same time and the first phone to answer wins.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        SectionCard("Visitor chime") {
+            ToggleRow(
+                title = "Play until ringing stops",
+                subtitle = "Keep playing the visitor chime until a phone answers or the call rings out",
+                checked = settings.doorbellChimeUntilCallEnds,
+                onChange = { enabled ->
+                    vm.updateSettings { it.copy(doorbellChimeUntilCallEnds = enabled) }
+                },
+            )
+            if (!settings.doorbellChimeUntilCallEnds) {
+                StepperRow(
+                    label = "Number of chimes",
+                    value = settings.doorbellChimeCount.toString(),
+                    onTap = {
+                        val next = if (settings.doorbellChimeCount >= 10) 1
+                        else settings.doorbellChimeCount + 1
+                        vm.updateSettings { it.copy(doorbellChimeCount = next) }
+                    },
+                )
+            }
+            TextButton(onClick = { preview(context, "raw:chime_ring") }) {
+                Text("Preview visitor chime")
+            }
+        }
+
+        SectionCard("Security") {
+            OutlinedTextField(
+                value = pin,
+                onValueChange = { pin = it.filter(Char::isDigit).take(8) },
+                label = { Text("Settings PIN") },
+                supportingText = { Text("Use 4 to 8 digits. The factory PIN is 1234.") },
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        SectionCard("No answer") {
+            OutlinedTextField(
+                value = noAnswer,
+                onValueChange = { noAnswer = it },
+                label = { Text("Message shown to visitor") },
+                minLines = 2,
+                maxLines = 3,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        Button(
+            onClick = { saveDoorbellFields() },
+            enabled = target.isNotBlank() && pin.length >= 4,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Save doorbell settings")
+        }
+
+        SectionCard("Doorbell mode") {
+            ToggleRow(
+                title = "Use this device as a doorbell",
+                subtitle = if (settings.doorbellEnabled)
+                    "Doorbell mode is active. Turning it off restores the normal phone interface."
+                else
+                    "Configure and save the fields above before enabling the dedicated visitor screen.",
+                checked = settings.doorbellEnabled,
+                enabled = settings.doorbellEnabled || (target.isNotBlank() && pin.length >= 4),
+                onChange = { enabled ->
+                    if (!enabled || (target.isNotBlank() && pin.length >= 4)) {
+                        saveDoorbellFields(enabled)
+                    }
+                },
+            )
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
 private fun preview(context: android.content.Context, spec: String) {
     val resName = spec.removePrefix("raw:")
     val id = context.resources.getIdentifier(resName, "raw", context.packageName)
@@ -386,7 +604,13 @@ private fun SectionCard(title: String, content: @Composable androidx.compose.fou
 }
 
 @Composable
-private fun ToggleRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun ToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onChange: (Boolean) -> Unit,
+) {
     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, fontWeight = FontWeight.Medium)
@@ -396,7 +620,7 @@ private fun ToggleRow(title: String, subtitle: String, checked: Boolean, onChang
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
     }
 }
 @Composable
