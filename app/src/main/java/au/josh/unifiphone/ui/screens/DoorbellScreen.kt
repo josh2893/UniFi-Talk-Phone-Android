@@ -32,7 +32,7 @@ import androidx.compose.material.icons.filled.Backspace
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.InfoOutline
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -219,7 +219,7 @@ fun DoorbellScreen(vm: PhoneViewModel, onAdminUnlocked: () -> Unit) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        Icons.Filled.InfoOutline,
+                        Icons.Filled.Info,
                         contentDescription = null,
                         tint = UbntBlueDim,
                         modifier = Modifier.size(25.dp),

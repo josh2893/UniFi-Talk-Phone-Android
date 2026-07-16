@@ -28,7 +28,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.InfoOutline
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material.icons.filled.MarkEmailRead
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -258,7 +258,7 @@ fun DeliveryScreen(
                         .background(UbntBlueDim),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Filled.InfoOutline, null, tint = Color.White)
+                    Icon(Icons.Filled.Info, null, tint = Color.White)
                 }
                 Spacer(Modifier.width(14.dp))
                 Text(
