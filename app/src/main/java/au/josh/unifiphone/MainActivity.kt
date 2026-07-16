@@ -40,7 +40,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
-import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -55,10 +54,11 @@ import au.josh.unifiphone.ui.screens.HistoryScreen
 import au.josh.unifiphone.ui.screens.HomeScreen
 import au.josh.unifiphone.ui.screens.SettingsScreen
 import au.josh.unifiphone.ui.theme.UniFiPhoneTheme
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
+
+    private var immersiveModeActive = false
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { }
@@ -76,14 +76,6 @@ class MainActivity : ComponentActivity() {
 
         SipForegroundService.start(this)
 
-        // Re-enter kiosk lock if it was enabled
-        lifecycleScope.launch {
-            val app = application as App
-            if (app.settingsRepo.settings.first().kioskEnabled) {
-                KioskManager.enterKiosk(this@MainActivity)
-            }
-        }
-
         setContent {
             val vm: PhoneViewModel = viewModel()
             val settings by vm.settings.collectAsState()
@@ -94,16 +86,20 @@ class MainActivity : ComponentActivity() {
                 ThemeMode.SYSTEM -> isSystemInDarkTheme()
             }
 
-            LaunchedEffect(settings.doorbellEnabled) {
-                val insets = WindowCompat.getInsetsController(window, window.decorView)
-                if (settings.doorbellEnabled) {
-                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    insets.hide(WindowInsetsCompat.Type.systemBars())
-                    insets.systemBarsBehavior =
-                        WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            LaunchedEffect(settings.doorbellEnabled, settings.kioskEnabled) {
+                immersiveModeActive = settings.doorbellEnabled || settings.kioskEnabled
+                applyKioskSystemUi(immersiveModeActive)
+                while (settings.doorbellEnabled || settings.kioskEnabled) {
+                    delay(1_500)
+                    applyKioskSystemUi(true)
+                }
+            }
+
+            LaunchedEffect(settings.kioskEnabled) {
+                if (settings.kioskEnabled) {
+                    KioskManager.enterKiosk(this@MainActivity)
                 } else {
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                    insets.show(WindowInsetsCompat.Type.systemBars())
+                    KioskManager.exitKiosk(this@MainActivity)
                 }
             }
 
@@ -121,6 +117,7 @@ class MainActivity : ComponentActivity() {
                         navigationBarStyle = SystemBarStyle.light(transparent, transparent),
                     )
                 }
+                applyKioskSystemUi(immersiveModeActive)
             }
 
             UniFiPhoneTheme(mode = if (settings.doorbellEnabled) ThemeMode.DARK else settings.themeMode) {
@@ -128,6 +125,29 @@ class MainActivity : ComponentActivity() {
                     Root(vm)
                 }
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        applyKioskSystemUi(immersiveModeActive)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applyKioskSystemUi(immersiveModeActive)
+    }
+
+    private fun applyKioskSystemUi(enabled: Boolean) {
+        val insets = WindowCompat.getInsetsController(window, window.decorView)
+        if (enabled) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            insets.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            insets.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            insets.show(WindowInsetsCompat.Type.systemBars())
         }
     }
 }

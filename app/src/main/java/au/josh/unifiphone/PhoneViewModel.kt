@@ -62,6 +62,8 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app) {
             recipient = recipient,
             doorName = current.doorbellTitle,
             address = current.doorbellAddress,
+            apiKeyHeader = current.doorbellDeliveryApiKeyHeader,
+            apiKey = current.doorbellDeliveryApiKey,
         )
         onResult(result.isSuccess)
     }

@@ -21,10 +21,8 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -62,13 +60,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import au.josh.unifiphone.PhoneViewModel
 import au.josh.unifiphone.R
-import au.josh.unifiphone.core.RegState
 import au.josh.unifiphone.data.AppSettings
 import au.josh.unifiphone.ui.theme.DangerRed
 import au.josh.unifiphone.ui.theme.SuccessGreen
 import au.josh.unifiphone.ui.theme.UbntBlueDim
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
 
 private val DeliveryBackground = Color(0xFF080B10)
@@ -91,7 +86,6 @@ private enum class DeliveryUiState { SELECTING, SENDING, SUCCESS, ERROR }
 fun DeliveryScreen(
     vm: PhoneViewModel,
     settings: AppSettings,
-    registration: RegState,
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
     onComplete: () -> Unit,
@@ -163,13 +157,13 @@ fun DeliveryScreen(
             .fillMaxSize()
             .background(DeliveryBackground)
             .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(horizontal = 22.dp, vertical = 16.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        DeliveryStatusBar(registration)
-        Spacer(Modifier.height(18.dp))
-
-        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            contentAlignment = Alignment.Center,
+        ) {
             IconButton(
                 onClick = onBack,
                 enabled = state == DeliveryUiState.SELECTING || state == DeliveryUiState.ERROR,
@@ -180,7 +174,7 @@ fun DeliveryScreen(
             Text(
                 "Delivery Instructions",
                 color = DeliveryText,
-                fontSize = 25.sp,
+                fontSize = 23.sp,
                 fontWeight = FontWeight.SemiBold,
             )
         }
@@ -188,118 +182,116 @@ fun DeliveryScreen(
         Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
             if (state == DeliveryUiState.SELECTING) {
                 Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(bottom = 12.dp),
+                    modifier = Modifier.fillMaxSize(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-            Spacer(Modifier.height(8.dp))
-            Text("Who is this delivery for?", color = DeliveryMuted, fontSize = 17.sp)
-            Spacer(Modifier.height(20.dp))
+                    Text("Who is this delivery for?", color = DeliveryMuted, fontSize = 15.sp)
+                    Spacer(Modifier.height(10.dp))
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                recipients.take(3).forEach { recipient ->
-                    DeliveryRecipientCard(
-                        recipient = recipient,
-                        selected = selectedId == recipient.id,
-                        onClick = { selectedId = recipient.id },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-            Spacer(Modifier.height(12.dp))
-            OtherRecipientButton(
-                recipient = recipients.last(),
-                selected = selectedId == recipients.last().id,
-                onClick = { selectedId = recipients.last().id },
-            )
-
-            Spacer(Modifier.height(26.dp))
-            Text(
-                "Delivery instructions",
-                color = DeliveryText,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(10.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .border(1.dp, DeliveryLine, RoundedCornerShape(8.dp))
-                    .padding(18.dp),
-            ) {
-                Text(
-                    settings.doorbellDeliveryInstructions,
-                    color = DeliveryText,
-                    fontSize = 15.sp,
-                    lineHeight = 22.sp,
-                )
-            }
-
-            Spacer(Modifier.height(16.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(DeliverySurface)
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .background(UbntBlueDim),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Filled.Info, null, tint = Color.White)
-                }
-                Spacer(Modifier.width(14.dp))
-                Text(
-                    "A notification will be sent to the selected person.",
-                    color = DeliveryText,
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-
-            if (selected != null && selected.webhook.isBlank()) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "This recipient does not have a webhook configured.",
-                    color = DangerRed,
-                    fontSize = 13.sp,
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            Button(
-                onClick = {
-                    selected?.let { target ->
-                        state = DeliveryUiState.SENDING
-                        webhookResult = null
-                        sendStartedAt = System.currentTimeMillis()
-                        vm.sendDeliveryNotification(target.name, target.webhook) { success ->
-                            webhookResult = success
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        recipients.take(3).forEach { recipient ->
+                            DeliveryRecipientCard(
+                                recipient = recipient,
+                                selected = selectedId == recipient.id,
+                                onClick = { selectedId = recipient.id },
+                                modifier = Modifier.weight(1f),
+                            )
                         }
                     }
-                },
-                enabled = selected?.webhook?.isNotBlank() == true,
-                colors = ButtonDefaults.buttonColors(containerColor = UbntBlueDim),
-                shape = RoundedCornerShape(8.dp),
-                modifier = Modifier.fillMaxWidth().height(58.dp),
-            ) {
-                Icon(Icons.Filled.NotificationsActive, contentDescription = null)
-                Spacer(Modifier.width(10.dp))
-                Text("Send Notification", fontSize = 17.sp)
+                    Spacer(Modifier.height(8.dp))
+                    OtherRecipientButton(
+                        recipient = recipients.last(),
+                        selected = selectedId == recipients.last().id,
+                        onClick = { selectedId = recipients.last().id },
+                    )
+
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "Delivery instructions",
+                        color = DeliveryText,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(1.dp, DeliveryLine, RoundedCornerShape(8.dp))
+                            .padding(12.dp),
+                        contentAlignment = Alignment.TopStart,
+                    ) {
+                        Text(
+                            settings.doorbellDeliveryInstructions,
+                            color = DeliveryText,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                            maxLines = 7,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(DeliverySurface)
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(CircleShape)
+                                .background(UbntBlueDim),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Filled.Info, null, tint = Color.White, modifier = Modifier.size(19.dp))
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            if (selected != null && selected.webhook.isBlank())
+                                "This person does not have a webhook configured."
+                            else
+                                "A notification will be sent to the selected person.",
+                            color = if (selected != null && selected.webhook.isBlank()) DangerRed else DeliveryText,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            selected?.let { target ->
+                                state = DeliveryUiState.SENDING
+                                webhookResult = null
+                                sendStartedAt = System.currentTimeMillis()
+                                vm.sendDeliveryNotification(target.name, target.webhook) { success ->
+                                    webhookResult = success
+                                }
+                            }
+                        },
+                        enabled = selected?.webhook?.isNotBlank() == true,
+                        colors = ButtonDefaults.buttonColors(containerColor = UbntBlueDim),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                    ) {
+                        Icon(Icons.Filled.NotificationsActive, contentDescription = null)
+                        Spacer(Modifier.width(10.dp))
+                        Text("Send Notification", fontSize = 16.sp)
+                    }
                 }
-            }
             } else {
                 DeliveryProgressContent(
                     state = state,
@@ -321,40 +313,6 @@ fun DeliveryScreen(
 }
 
 @Composable
-private fun DeliveryStatusBar(registration: RegState) {
-    var now by remember { mutableStateOf(LocalTime.now()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            now = LocalTime.now()
-            delay(1_000)
-        }
-    }
-    val registered = registration == RegState.OK
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            Modifier
-                .size(10.dp)
-                .clip(CircleShape)
-                .background(if (registered) SuccessGreen else DangerRed)
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            if (registered) "REGISTERED" else "OFFLINE",
-            color = if (registered) SuccessGreen else DangerRed,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.weight(1f))
-        Text(
-            now.format(DateTimeFormatter.ofPattern("h:mm a")),
-            color = DeliveryText,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.Medium,
-        )
-    }
-}
-
-@Composable
 private fun DeliveryRecipientCard(
     recipient: DeliveryRecipient,
     selected: Boolean,
@@ -363,7 +321,7 @@ private fun DeliveryRecipientCard(
 ) {
     Column(
         modifier = modifier
-            .height(132.dp)
+            .height(98.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(DeliverySurface)
             .border(
@@ -372,29 +330,30 @@ private fun DeliveryRecipientCard(
                 shape = RoundedCornerShape(8.dp),
             )
             .clickable(role = Role.RadioButton, onClick = onClick)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.SpaceBetween,
+            .padding(horizontal = 6.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(7.dp, Alignment.CenterVertically),
     ) {
         Box(
             modifier = Modifier
-                .size(44.dp)
+                .size(36.dp)
                 .clip(CircleShape)
                 .background(recipient.color),
             contentAlignment = Alignment.Center,
         ) {
             Text(initials(recipient.name), color = Color.White, fontWeight = FontWeight.SemiBold)
         }
-        Column {
-            Text(
-                recipient.name,
-                color = DeliveryText,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text("Notify", color = DeliveryMuted, fontSize = 12.sp)
-        }
+        Text(
+            recipient.name,
+            color = DeliveryText,
+            fontSize = if (recipient.name.length > 18) 12.sp else 14.sp,
+            lineHeight = 16.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 
@@ -407,7 +366,7 @@ private fun OtherRecipientButton(
     Row(
         modifier = Modifier
             .fillMaxWidth(0.72f)
-            .height(64.dp)
+            .height(48.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(DeliverySurface)
             .border(
@@ -416,13 +375,19 @@ private fun OtherRecipientButton(
                 RoundedCornerShape(8.dp),
             )
             .clickable(role = Role.RadioButton, onClick = onClick)
-            .padding(horizontal = 20.dp),
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
         Icon(Icons.Filled.PersonAdd, contentDescription = null, tint = DeliveryMuted)
         Spacer(Modifier.width(14.dp))
-        Text(recipient.name, color = DeliveryText, fontSize = 15.sp)
+        Text(
+            recipient.name,
+            color = DeliveryText,
+            fontSize = 14.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

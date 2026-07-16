@@ -37,6 +37,17 @@ The optional delivery screen supports three named recipients plus a configurable
 `event`, `recipient`, `door`, `address`, and `sentAt` JSON fields. Successful delivery
 notifications show an animated confirmation, play the bundled notification sound, and
 return to the doorbell automatically. The screen also closes after two minutes of inactivity.
+Webhooks can include a shared API credential using a configurable header name, such as
+`X-API-Key`, or an `Authorization` header with a complete bearer value.
+
+## Web management
+
+The Doorbell settings tab shows the phone's current IPv4 address and includes a
+PIN-protected local web interface. Enable **Web management**, choose a port (the default
+is `8080`), then open the displayed address from a browser on the same network. Sign in
+with the doorbell admin PIN. The interface exposes the phone, SIP, video, doorbell,
+delivery, and system settings, and can import or export the same JSON backup format used
+by the Android app. Web management is disabled by default.
 
 ## Build (produces the sideloadable APK)
 
@@ -72,7 +83,10 @@ adb shell dpm set-device-owner au.josh.unifiphone/.kiosk.PhoneDeviceAdminReceive
 ```
 
 Then enable "Lock to this app" in Settings. The app also declares the HOME
-intent category, so it can be set as the default launcher on the handset.
+intent category, so it can be set as the default launcher on the handset. For reliable
+automatic startup after power-on, select UniFi Phone as the handset's default Home app.
+The boot receiver also restores the SIP service and reopens an enabled kiosk/doorbell
+session after boot or an app update, subject to the device's Android background-launch rules.
 
 To remove device owner later:
 `adb shell dpm remove-active-admin au.josh.unifiphone/.kiosk.PhoneDeviceAdminReceiver`

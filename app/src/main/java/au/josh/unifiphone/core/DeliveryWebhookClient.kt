@@ -13,6 +13,8 @@ object DeliveryWebhookClient {
         recipient: String,
         doorName: String,
         address: String,
+        apiKeyHeader: String,
+        apiKey: String,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val url = URL(webhookUrl.trim())
@@ -34,6 +36,13 @@ object DeliveryWebhookClient {
                 doOutput = true
                 setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 setRequestProperty("Accept", "application/json")
+                if (apiKey.isNotBlank()) {
+                    val header = apiKeyHeader.trim().ifBlank { "X-API-Key" }
+                    require(header.matches(Regex("[!#$%&'*+.^_`|~0-9A-Za-z-]+"))) {
+                        "Invalid API key header name"
+                    }
+                    setRequestProperty(header, apiKey)
+                }
             }
             try {
                 connection.outputStream.use { output ->

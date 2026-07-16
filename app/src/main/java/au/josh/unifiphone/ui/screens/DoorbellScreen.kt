@@ -80,6 +80,17 @@ private val DoorbellSurface = Color(0xFF11161D)
 private val DoorbellText = Color(0xFFF3F6FA)
 private val DoorbellMuted = Color(0xFF9AA5B4)
 private val DoorbellLine = Color(0xFF202832)
+private val DoorbellPixelShiftPattern = listOf(
+    0f to 0f,
+    2f to 0f,
+    2f to 2f,
+    0f to 2f,
+    -2f to 2f,
+    -2f to 0f,
+    -2f to -2f,
+    0f to -2f,
+    2f to -2f,
+)
 
 private enum class DoorbellCallState { IDLE, RINGING, CONNECTED, NO_ANSWER }
 
@@ -97,6 +108,7 @@ fun DoorbellScreen(vm: PhoneViewModel, onAdminUnlocked: () -> Unit) {
     var localMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var showPin by rememberSaveable { mutableStateOf(false) }
     var showDelivery by rememberSaveable { mutableStateOf(false) }
+    var pixelShiftIndex by remember { mutableIntStateOf(0) }
 
     DisposableEffect(chime) {
         onDispose { chime.stop() }
@@ -140,6 +152,18 @@ fun DoorbellScreen(vm: PhoneViewModel, onAdminUnlocked: () -> Unit) {
         else -> DoorbellCallState.IDLE
     }
 
+    LaunchedEffect(visualState) {
+        if (visualState != DoorbellCallState.IDLE) {
+            pixelShiftIndex = 0
+            return@LaunchedEffect
+        }
+        while (true) {
+            delay(60_000)
+            pixelShiftIndex = (pixelShiftIndex + 1) % DoorbellPixelShiftPattern.size
+        }
+    }
+    val pixelShift = DoorbellPixelShiftPattern[pixelShiftIndex]
+
     if (showDelivery) {
         LaunchedEffect(Unit) {
             delay(120_000)
@@ -148,7 +172,6 @@ fun DoorbellScreen(vm: PhoneViewModel, onAdminUnlocked: () -> Unit) {
         DeliveryScreen(
             vm = vm,
             settings = settings,
-            registration = registration,
             onBack = { showDelivery = false },
             onOpenSettings = { showPin = true },
             onComplete = { showDelivery = false },
@@ -177,7 +200,12 @@ fun DoorbellScreen(vm: PhoneViewModel, onAdminUnlocked: () -> Unit) {
         val buttonSize = (maxWidth * 0.62f).coerceIn(184.dp, 244.dp)
 
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationX = pixelShift.first
+                    translationY = pixelShift.second
+                },
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             DoorbellTopBar(registration)
@@ -264,27 +292,32 @@ fun DoorbellScreen(vm: PhoneViewModel, onAdminUnlocked: () -> Unit) {
                 },
             )
 
-            Spacer(Modifier.height(22.dp))
-            DoorbellStateMessage(
-                state = visualState,
-                idleMessage = settings.doorbellIdleMessage,
-                noAnswerMessage = localMessage ?: settings.doorbellNoAnswerMessage,
-            )
+            if (visualState != DoorbellCallState.IDLE || settings.doorbellIdleMessage.isNotBlank()) {
+                Spacer(Modifier.height(22.dp))
+                DoorbellStateMessage(
+                    state = visualState,
+                    idleMessage = settings.doorbellIdleMessage,
+                    noAnswerMessage = localMessage ?: settings.doorbellNoAnswerMessage,
+                )
+            }
             Spacer(Modifier.weight(1f))
 
-            if (settings.doorbellDeliveryEnabled) {
-                DeliveryEntryCard(
-                    enabled = !call.active,
-                    onClick = { showDelivery = true },
-                )
-                Spacer(Modifier.height(6.dp))
-            }
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 2.dp),
-                horizontalArrangement = Arrangement.End,
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (settings.doorbellDeliveryEnabled) {
+                    Box(Modifier.weight(1f)) {
+                        DeliveryEntryCard(
+                            enabled = !call.active,
+                            onClick = { showDelivery = true },
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                } else {
+                    Spacer(Modifier.weight(1f))
+                }
                 IconButton(
                     onClick = { showPin = true },
                     enabled = !call.active,

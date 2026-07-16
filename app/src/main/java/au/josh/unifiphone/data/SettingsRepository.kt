@@ -46,6 +46,10 @@ fun AppSettings.toBackupJson(): String {
     o.put("doorbellDeliveryPerson3Webhook", doorbellDeliveryPerson3Webhook)
     o.put("doorbellDeliveryOtherName", doorbellDeliveryOtherName)
     o.put("doorbellDeliveryOtherWebhook", doorbellDeliveryOtherWebhook)
+    o.put("doorbellDeliveryApiKeyHeader", doorbellDeliveryApiKeyHeader)
+    o.put("doorbellDeliveryApiKey", doorbellDeliveryApiKey)
+    o.put("webManagementEnabled", webManagementEnabled)
+    o.put("webManagementPort", webManagementPort)
     return o.toString(2)
 }
 
@@ -102,6 +106,10 @@ fun appSettingsFromBackupJson(json: String, base: AppSettings = AppSettings()): 
         doorbellDeliveryPerson3Webhook = str("doorbellDeliveryPerson3Webhook", base.doorbellDeliveryPerson3Webhook),
         doorbellDeliveryOtherName = str("doorbellDeliveryOtherName", base.doorbellDeliveryOtherName),
         doorbellDeliveryOtherWebhook = str("doorbellDeliveryOtherWebhook", base.doorbellDeliveryOtherWebhook),
+        doorbellDeliveryApiKeyHeader = str("doorbellDeliveryApiKeyHeader", base.doorbellDeliveryApiKeyHeader),
+        doorbellDeliveryApiKey = str("doorbellDeliveryApiKey", base.doorbellDeliveryApiKey),
+        webManagementEnabled = bool("webManagementEnabled", base.webManagementEnabled),
+        webManagementPort = int("webManagementPort", base.webManagementPort),
     )
 }
 
@@ -195,6 +203,12 @@ data class AppSettings(
     val doorbellDeliveryPerson3Webhook: String = "",
     val doorbellDeliveryOtherName: String = "Someone else",
     val doorbellDeliveryOtherWebhook: String = "",
+    val doorbellDeliveryApiKeyHeader: String = "X-API-Key",
+    val doorbellDeliveryApiKey: String = "",
+
+    // PIN-protected administration interface served on the local network.
+    val webManagementEnabled: Boolean = false,
+    val webManagementPort: Int = 8080,
 )
 
 class SettingsRepository(private val context: Context) {
@@ -246,6 +260,10 @@ class SettingsRepository(private val context: Context) {
         val DOORBELL_DELIVERY_PERSON_3_WEBHOOK = stringPreferencesKey("doorbell_delivery_person_3_webhook")
         val DOORBELL_DELIVERY_OTHER_NAME = stringPreferencesKey("doorbell_delivery_other_name")
         val DOORBELL_DELIVERY_OTHER_WEBHOOK = stringPreferencesKey("doorbell_delivery_other_webhook")
+        val DOORBELL_DELIVERY_API_KEY_HEADER = stringPreferencesKey("doorbell_delivery_api_key_header")
+        val DOORBELL_DELIVERY_API_KEY = stringPreferencesKey("doorbell_delivery_api_key")
+        val WEB_MANAGEMENT_ENABLED = booleanPreferencesKey("web_management_enabled")
+        val WEB_MANAGEMENT_PORT = androidx.datastore.preferences.core.intPreferencesKey("web_management_port")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -303,6 +321,10 @@ class SettingsRepository(private val context: Context) {
             doorbellDeliveryPerson3Webhook = p[Keys.DOORBELL_DELIVERY_PERSON_3_WEBHOOK] ?: "",
             doorbellDeliveryOtherName = p[Keys.DOORBELL_DELIVERY_OTHER_NAME] ?: "Someone else",
             doorbellDeliveryOtherWebhook = p[Keys.DOORBELL_DELIVERY_OTHER_WEBHOOK] ?: "",
+            doorbellDeliveryApiKeyHeader = p[Keys.DOORBELL_DELIVERY_API_KEY_HEADER] ?: "X-API-Key",
+            doorbellDeliveryApiKey = p[Keys.DOORBELL_DELIVERY_API_KEY] ?: "",
+            webManagementEnabled = p[Keys.WEB_MANAGEMENT_ENABLED] ?: false,
+            webManagementPort = p[Keys.WEB_MANAGEMENT_PORT] ?: 8080,
         )
     }
 
@@ -357,6 +379,10 @@ class SettingsRepository(private val context: Context) {
             p[Keys.DOORBELL_DELIVERY_PERSON_3_WEBHOOK] = next.doorbellDeliveryPerson3Webhook
             p[Keys.DOORBELL_DELIVERY_OTHER_NAME] = next.doorbellDeliveryOtherName
             p[Keys.DOORBELL_DELIVERY_OTHER_WEBHOOK] = next.doorbellDeliveryOtherWebhook
+            p[Keys.DOORBELL_DELIVERY_API_KEY_HEADER] = next.doorbellDeliveryApiKeyHeader
+            p[Keys.DOORBELL_DELIVERY_API_KEY] = next.doorbellDeliveryApiKey
+            p[Keys.WEB_MANAGEMENT_ENABLED] = next.webManagementEnabled
+            p[Keys.WEB_MANAGEMENT_PORT] = next.webManagementPort.coerceIn(1024, 65535)
         }
     }
 }

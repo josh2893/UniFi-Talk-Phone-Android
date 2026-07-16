@@ -47,6 +47,7 @@ import au.josh.unifiphone.data.EntryType
 import au.josh.unifiphone.data.ThemeMode
 import au.josh.unifiphone.data.Transport
 import au.josh.unifiphone.kiosk.KioskManager
+import au.josh.unifiphone.web.WebManagementServer
 import androidx.compose.runtime.saveable.rememberSaveable
 
 private val builtInTones = listOf(
@@ -445,6 +446,18 @@ private fun DoorbellSettingsContent(vm: PhoneViewModel) {
     var otherWebhook by remember(settings.doorbellDeliveryOtherWebhook) {
         mutableStateOf(settings.doorbellDeliveryOtherWebhook)
     }
+    var apiKeyHeader by remember(settings.doorbellDeliveryApiKeyHeader) {
+        mutableStateOf(settings.doorbellDeliveryApiKeyHeader)
+    }
+    var apiKey by remember(settings.doorbellDeliveryApiKey) {
+        mutableStateOf(settings.doorbellDeliveryApiKey)
+    }
+    var webPort by remember(settings.webManagementPort) {
+        mutableStateOf(settings.webManagementPort.toString())
+    }
+    val phoneIp = remember(settings.webManagementEnabled, settings.webManagementPort) {
+        WebManagementServer.localIpv4Address()
+    }
     val videoGroups = entries.filter { it.type == EntryType.GROUP_VIDEO }
 
     fun saveDoorbellFields(enabled: Boolean = settings.doorbellEnabled) {
@@ -454,7 +467,7 @@ private fun DoorbellSettingsContent(vm: PhoneViewModel) {
                 doorbellBanner = banner.trim(),
                 doorbellTitle = title.trim().ifBlank { "Front Door" },
                 doorbellAddress = address.trim(),
-                doorbellIdleMessage = idleMessage.trim().ifBlank { "Ready when you are." },
+                doorbellIdleMessage = idleMessage.trim(),
                 doorbellInstruction = instruction.trim().ifBlank {
                     "Welcome. Please use the doorbell button below."
                 },
@@ -476,6 +489,8 @@ private fun DoorbellSettingsContent(vm: PhoneViewModel) {
                 doorbellDeliveryPerson3Webhook = person3Webhook.trim(),
                 doorbellDeliveryOtherName = otherName.trim().ifBlank { "Someone else" },
                 doorbellDeliveryOtherWebhook = otherWebhook.trim(),
+                doorbellDeliveryApiKeyHeader = apiKeyHeader.trim().ifBlank { "X-API-Key" },
+                doorbellDeliveryApiKey = apiKey.trim(),
             )
         }
     }
@@ -487,6 +502,49 @@ private fun DoorbellSettingsContent(vm: PhoneViewModel) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        SectionCard("Web management") {
+            ToggleRow(
+                title = "Enable web management",
+                subtitle = "Manage this phone from a browser on the same network",
+                checked = settings.webManagementEnabled,
+                onChange = { enabled ->
+                    vm.updateSettings { it.copy(webManagementEnabled = enabled) }
+                },
+            )
+            Text(
+                "Phone IP address: ${phoneIp ?: "Not connected"}",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                if (settings.webManagementEnabled && phoneIp != null)
+                    "Open http://$phoneIp:${settings.webManagementPort}"
+                else
+                    "Enable web management to open the browser interface.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = webPort,
+                onValueChange = { webPort = it.filter(Char::isDigit).take(5) },
+                label = { Text("Web server port") },
+                supportingText = { Text("Use a port from 1024 to 65535") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(
+                onClick = {
+                    val nextPort = webPort.toIntOrNull() ?: return@Button
+                    vm.updateSettings { it.copy(webManagementPort = nextPort) }
+                },
+                enabled = webPort.toIntOrNull()?.let { it in 1024..65535 } == true,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Apply web access")
+            }
+        }
+
         SectionCard("Display") {
             OutlinedTextField(
                 value = banner,
@@ -647,6 +705,25 @@ private fun DoorbellSettingsContent(vm: PhoneViewModel) {
         }
 
         if (settings.doorbellDeliveryEnabled) {
+            SectionCard("Webhook authentication") {
+                OutlinedTextField(
+                    value = apiKeyHeader,
+                    onValueChange = { apiKeyHeader = it },
+                    label = { Text("API key header") },
+                    supportingText = { Text("For example: X-API-Key or Authorization") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    label = { Text("API key or bearer value") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
             SectionCard("Delivery recipients") {
                 DeliveryRecipientFields(
                     label = "Person 1",
