@@ -409,10 +409,41 @@ private fun DoorbellSettingsContent(vm: PhoneViewModel) {
     var title by remember(settings.doorbellTitle) { mutableStateOf(settings.doorbellTitle) }
     var address by remember(settings.doorbellAddress) { mutableStateOf(settings.doorbellAddress) }
     var instruction by remember(settings.doorbellInstruction) { mutableStateOf(settings.doorbellInstruction) }
+    var idleMessage by remember(settings.doorbellIdleMessage) { mutableStateOf(settings.doorbellIdleMessage) }
     var target by remember(settings.doorbellTarget) { mutableStateOf(settings.doorbellTarget) }
     var pin by remember(settings.doorbellAdminPin) { mutableStateOf(settings.doorbellAdminPin) }
     var noAnswer by remember(settings.doorbellNoAnswerMessage) {
         mutableStateOf(settings.doorbellNoAnswerMessage)
+    }
+    var deliveryInstructions by remember(settings.doorbellDeliveryInstructions) {
+        mutableStateOf(settings.doorbellDeliveryInstructions)
+    }
+    var deliveryThankYou by remember(settings.doorbellDeliveryThankYou) {
+        mutableStateOf(settings.doorbellDeliveryThankYou)
+    }
+    var person1Name by remember(settings.doorbellDeliveryPerson1Name) {
+        mutableStateOf(settings.doorbellDeliveryPerson1Name)
+    }
+    var person1Webhook by remember(settings.doorbellDeliveryPerson1Webhook) {
+        mutableStateOf(settings.doorbellDeliveryPerson1Webhook)
+    }
+    var person2Name by remember(settings.doorbellDeliveryPerson2Name) {
+        mutableStateOf(settings.doorbellDeliveryPerson2Name)
+    }
+    var person2Webhook by remember(settings.doorbellDeliveryPerson2Webhook) {
+        mutableStateOf(settings.doorbellDeliveryPerson2Webhook)
+    }
+    var person3Name by remember(settings.doorbellDeliveryPerson3Name) {
+        mutableStateOf(settings.doorbellDeliveryPerson3Name)
+    }
+    var person3Webhook by remember(settings.doorbellDeliveryPerson3Webhook) {
+        mutableStateOf(settings.doorbellDeliveryPerson3Webhook)
+    }
+    var otherName by remember(settings.doorbellDeliveryOtherName) {
+        mutableStateOf(settings.doorbellDeliveryOtherName)
+    }
+    var otherWebhook by remember(settings.doorbellDeliveryOtherWebhook) {
+        mutableStateOf(settings.doorbellDeliveryOtherWebhook)
     }
     val videoGroups = entries.filter { it.type == EntryType.GROUP_VIDEO }
 
@@ -423,8 +454,9 @@ private fun DoorbellSettingsContent(vm: PhoneViewModel) {
                 doorbellBanner = banner.trim(),
                 doorbellTitle = title.trim().ifBlank { "Front Door" },
                 doorbellAddress = address.trim(),
+                doorbellIdleMessage = idleMessage.trim().ifBlank { "Ready when you are." },
                 doorbellInstruction = instruction.trim().ifBlank {
-                    "Please press the button below to ring the doorbell."
+                    "Welcome. Please use the doorbell button below."
                 },
                 doorbellTarget = target.split(',', ';', ' ')
                     .map { it.trim() }.filter { it.isNotEmpty() }.joinToString(","),
@@ -432,6 +464,18 @@ private fun DoorbellSettingsContent(vm: PhoneViewModel) {
                 doorbellNoAnswerMessage = noAnswer.trim().ifBlank {
                     "Sorry, no one is available right now."
                 },
+                doorbellDeliveryInstructions = deliveryInstructions.trim(),
+                doorbellDeliveryThankYou = deliveryThankYou.trim().ifBlank {
+                    "Thank you. Your delivery notification has been sent."
+                },
+                doorbellDeliveryPerson1Name = person1Name.trim().ifBlank { "Person 1" },
+                doorbellDeliveryPerson1Webhook = person1Webhook.trim(),
+                doorbellDeliveryPerson2Name = person2Name.trim().ifBlank { "Person 2" },
+                doorbellDeliveryPerson2Webhook = person2Webhook.trim(),
+                doorbellDeliveryPerson3Name = person3Name.trim().ifBlank { "Person 3" },
+                doorbellDeliveryPerson3Webhook = person3Webhook.trim(),
+                doorbellDeliveryOtherName = otherName.trim().ifBlank { "Someone else" },
+                doorbellDeliveryOtherWebhook = otherWebhook.trim(),
             )
         }
     }
@@ -467,13 +511,31 @@ private fun DoorbellSettingsContent(vm: PhoneViewModel) {
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
-                value = instruction,
-                onValueChange = { instruction = it },
-                label = { Text("Visitor instruction") },
-                minLines = 2,
-                maxLines = 3,
+                value = idleMessage,
+                onValueChange = { idleMessage = it },
+                label = { Text("Idle status message") },
+                supportingText = { Text("Shown below the doorbell button while it is ready") },
+                singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            ToggleRow(
+                title = "Show custom message",
+                subtitle = "Display an information message above the doorbell button",
+                checked = settings.doorbellMessageEnabled,
+                onChange = { enabled ->
+                    vm.updateSettings { it.copy(doorbellMessageEnabled = enabled) }
+                },
+            )
+            if (settings.doorbellMessageEnabled) {
+                OutlinedTextField(
+                    value = instruction,
+                    onValueChange = { instruction = it },
+                    label = { Text("Custom visitor message") },
+                    minLines = 2,
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
 
         SectionCard("Video call destination") {
@@ -552,6 +614,77 @@ private fun DoorbellSettingsContent(vm: PhoneViewModel) {
             )
         }
 
+        SectionCard("Delivery notifications") {
+            ToggleRow(
+                title = "Show delivery option",
+                subtitle = "Let a delivery person notify a selected recipient when no one answers",
+                checked = settings.doorbellDeliveryEnabled,
+                onChange = { enabled ->
+                    vm.updateSettings { it.copy(doorbellDeliveryEnabled = enabled) }
+                },
+            )
+            if (settings.doorbellDeliveryEnabled) {
+                OutlinedTextField(
+                    value = deliveryInstructions,
+                    onValueChange = { deliveryInstructions = it },
+                    label = { Text("Delivery instructions") },
+                    minLines = 4,
+                    maxLines = 8,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = deliveryThankYou,
+                    onValueChange = { deliveryThankYou = it },
+                    label = { Text("Thank-you message") },
+                    minLines = 2,
+                    maxLines = 3,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                TextButton(onClick = { preview(context, "raw:delivery_notification") }) {
+                    Text("Preview notification sound")
+                }
+            }
+        }
+
+        if (settings.doorbellDeliveryEnabled) {
+            SectionCard("Delivery recipients") {
+                DeliveryRecipientFields(
+                    label = "Person 1",
+                    name = person1Name,
+                    webhook = person1Webhook,
+                    onNameChange = { person1Name = it },
+                    onWebhookChange = { person1Webhook = it },
+                )
+                DeliveryRecipientFields(
+                    label = "Person 2",
+                    name = person2Name,
+                    webhook = person2Webhook,
+                    onNameChange = { person2Name = it },
+                    onWebhookChange = { person2Webhook = it },
+                )
+                DeliveryRecipientFields(
+                    label = "Person 3",
+                    name = person3Name,
+                    webhook = person3Webhook,
+                    onNameChange = { person3Name = it },
+                    onWebhookChange = { person3Webhook = it },
+                )
+                DeliveryRecipientFields(
+                    label = "Other recipient",
+                    name = otherName,
+                    webhook = otherWebhook,
+                    onNameChange = { otherName = it },
+                    onWebhookChange = { otherWebhook = it },
+                )
+                Text(
+                    "Webhooks are sent as HTTP POST requests with a JSON body containing " +
+                        "the recipient, door name, address, and timestamp.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
         Button(
             onClick = { saveDoorbellFields() },
             enabled = target.isNotBlank() && pin.length >= 4,
@@ -578,6 +711,32 @@ private fun DoorbellSettingsContent(vm: PhoneViewModel) {
         }
         Spacer(Modifier.height(24.dp))
     }
+}
+
+@Composable
+private fun DeliveryRecipientFields(
+    label: String,
+    name: String,
+    webhook: String,
+    onNameChange: (String) -> Unit,
+    onWebhookChange: (String) -> Unit,
+) {
+    Text(label, style = MaterialTheme.typography.labelLarge)
+    OutlinedTextField(
+        value = name,
+        onValueChange = onNameChange,
+        label = { Text("Display name") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
+    OutlinedTextField(
+        value = webhook,
+        onValueChange = onWebhookChange,
+        label = { Text("Webhook URL") },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 private fun preview(context: android.content.Context, spec: String) {

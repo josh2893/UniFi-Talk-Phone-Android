@@ -32,6 +32,12 @@ time, ringing, answered, and no-answer states. During a connected doorbell call 
 app routes audio to the built-in speaker at full call volume, then restores the previous
 volume when the call ends. The default settings PIN is `1234`; change it before deployment.
 
+The optional delivery screen supports three named recipients plus a configurable
+"Someone else" destination. Each destination sends an HTTP POST webhook containing
+`event`, `recipient`, `door`, `address`, and `sentAt` JSON fields. Successful delivery
+notifications show an animated confirmation, play the bundled notification sound, and
+return to the doorbell automatically. The screen also closes after two minutes of inactivity.
+
 ## Build (produces the sideloadable APK)
 
 1. Install Android Studio (Koala or newer).

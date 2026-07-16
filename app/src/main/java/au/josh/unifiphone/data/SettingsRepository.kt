@@ -33,6 +33,19 @@ fun AppSettings.toBackupJson(): String {
     o.put("doorbellChimeUntilCallEnds", doorbellChimeUntilCallEnds)
     o.put("doorbellChimeCount", doorbellChimeCount)
     o.put("doorbellNoAnswerMessage", doorbellNoAnswerMessage)
+    o.put("doorbellIdleMessage", doorbellIdleMessage)
+    o.put("doorbellMessageEnabled", doorbellMessageEnabled)
+    o.put("doorbellDeliveryEnabled", doorbellDeliveryEnabled)
+    o.put("doorbellDeliveryInstructions", doorbellDeliveryInstructions)
+    o.put("doorbellDeliveryThankYou", doorbellDeliveryThankYou)
+    o.put("doorbellDeliveryPerson1Name", doorbellDeliveryPerson1Name)
+    o.put("doorbellDeliveryPerson1Webhook", doorbellDeliveryPerson1Webhook)
+    o.put("doorbellDeliveryPerson2Name", doorbellDeliveryPerson2Name)
+    o.put("doorbellDeliveryPerson2Webhook", doorbellDeliveryPerson2Webhook)
+    o.put("doorbellDeliveryPerson3Name", doorbellDeliveryPerson3Name)
+    o.put("doorbellDeliveryPerson3Webhook", doorbellDeliveryPerson3Webhook)
+    o.put("doorbellDeliveryOtherName", doorbellDeliveryOtherName)
+    o.put("doorbellDeliveryOtherWebhook", doorbellDeliveryOtherWebhook)
     return o.toString(2)
 }
 
@@ -76,6 +89,19 @@ fun appSettingsFromBackupJson(json: String, base: AppSettings = AppSettings()): 
         doorbellChimeUntilCallEnds = bool("doorbellChimeUntilCallEnds", base.doorbellChimeUntilCallEnds),
         doorbellChimeCount = int("doorbellChimeCount", base.doorbellChimeCount),
         doorbellNoAnswerMessage = str("doorbellNoAnswerMessage", base.doorbellNoAnswerMessage),
+        doorbellIdleMessage = str("doorbellIdleMessage", base.doorbellIdleMessage),
+        doorbellMessageEnabled = bool("doorbellMessageEnabled", base.doorbellMessageEnabled),
+        doorbellDeliveryEnabled = bool("doorbellDeliveryEnabled", base.doorbellDeliveryEnabled),
+        doorbellDeliveryInstructions = str("doorbellDeliveryInstructions", base.doorbellDeliveryInstructions),
+        doorbellDeliveryThankYou = str("doorbellDeliveryThankYou", base.doorbellDeliveryThankYou),
+        doorbellDeliveryPerson1Name = str("doorbellDeliveryPerson1Name", base.doorbellDeliveryPerson1Name),
+        doorbellDeliveryPerson1Webhook = str("doorbellDeliveryPerson1Webhook", base.doorbellDeliveryPerson1Webhook),
+        doorbellDeliveryPerson2Name = str("doorbellDeliveryPerson2Name", base.doorbellDeliveryPerson2Name),
+        doorbellDeliveryPerson2Webhook = str("doorbellDeliveryPerson2Webhook", base.doorbellDeliveryPerson2Webhook),
+        doorbellDeliveryPerson3Name = str("doorbellDeliveryPerson3Name", base.doorbellDeliveryPerson3Name),
+        doorbellDeliveryPerson3Webhook = str("doorbellDeliveryPerson3Webhook", base.doorbellDeliveryPerson3Webhook),
+        doorbellDeliveryOtherName = str("doorbellDeliveryOtherName", base.doorbellDeliveryOtherName),
+        doorbellDeliveryOtherWebhook = str("doorbellDeliveryOtherWebhook", base.doorbellDeliveryOtherWebhook),
     )
 }
 
@@ -154,6 +180,21 @@ data class AppSettings(
     val doorbellChimeUntilCallEnds: Boolean = false,
     val doorbellChimeCount: Int = 2,
     val doorbellNoAnswerMessage: String = "Sorry, no one is available right now.",
+    val doorbellIdleMessage: String = "We are ready when you are.",
+    val doorbellMessageEnabled: Boolean = false,
+    val doorbellDeliveryEnabled: Boolean = false,
+    val doorbellDeliveryInstructions: String =
+        "Select who the delivery is for so they can be notified.\n\n" +
+            "Please leave the package in a safe place near the front door.",
+    val doorbellDeliveryThankYou: String = "Thank you. Your delivery notification has been sent.",
+    val doorbellDeliveryPerson1Name: String = "Person 1",
+    val doorbellDeliveryPerson1Webhook: String = "",
+    val doorbellDeliveryPerson2Name: String = "Person 2",
+    val doorbellDeliveryPerson2Webhook: String = "",
+    val doorbellDeliveryPerson3Name: String = "Person 3",
+    val doorbellDeliveryPerson3Webhook: String = "",
+    val doorbellDeliveryOtherName: String = "Someone else",
+    val doorbellDeliveryOtherWebhook: String = "",
 )
 
 class SettingsRepository(private val context: Context) {
@@ -192,6 +233,19 @@ class SettingsRepository(private val context: Context) {
         val DOORBELL_CHIME_UNTIL_END = booleanPreferencesKey("doorbell_chime_until_end")
         val DOORBELL_CHIME_COUNT = androidx.datastore.preferences.core.intPreferencesKey("doorbell_chime_count")
         val DOORBELL_NO_ANSWER = stringPreferencesKey("doorbell_no_answer_message")
+        val DOORBELL_IDLE_MESSAGE = stringPreferencesKey("doorbell_idle_message")
+        val DOORBELL_MESSAGE_ENABLED = booleanPreferencesKey("doorbell_message_enabled")
+        val DOORBELL_DELIVERY_ENABLED = booleanPreferencesKey("doorbell_delivery_enabled")
+        val DOORBELL_DELIVERY_INSTRUCTIONS = stringPreferencesKey("doorbell_delivery_instructions")
+        val DOORBELL_DELIVERY_THANK_YOU = stringPreferencesKey("doorbell_delivery_thank_you")
+        val DOORBELL_DELIVERY_PERSON_1_NAME = stringPreferencesKey("doorbell_delivery_person_1_name")
+        val DOORBELL_DELIVERY_PERSON_1_WEBHOOK = stringPreferencesKey("doorbell_delivery_person_1_webhook")
+        val DOORBELL_DELIVERY_PERSON_2_NAME = stringPreferencesKey("doorbell_delivery_person_2_name")
+        val DOORBELL_DELIVERY_PERSON_2_WEBHOOK = stringPreferencesKey("doorbell_delivery_person_2_webhook")
+        val DOORBELL_DELIVERY_PERSON_3_NAME = stringPreferencesKey("doorbell_delivery_person_3_name")
+        val DOORBELL_DELIVERY_PERSON_3_WEBHOOK = stringPreferencesKey("doorbell_delivery_person_3_webhook")
+        val DOORBELL_DELIVERY_OTHER_NAME = stringPreferencesKey("doorbell_delivery_other_name")
+        val DOORBELL_DELIVERY_OTHER_WEBHOOK = stringPreferencesKey("doorbell_delivery_other_webhook")
     }
 
     val settings: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -233,6 +287,22 @@ class SettingsRepository(private val context: Context) {
             doorbellChimeCount = p[Keys.DOORBELL_CHIME_COUNT] ?: 2,
             doorbellNoAnswerMessage = p[Keys.DOORBELL_NO_ANSWER]
                 ?: "Sorry, no one is available right now.",
+            doorbellIdleMessage = p[Keys.DOORBELL_IDLE_MESSAGE] ?: "We are ready when you are.",
+            doorbellMessageEnabled = p[Keys.DOORBELL_MESSAGE_ENABLED] ?: false,
+            doorbellDeliveryEnabled = p[Keys.DOORBELL_DELIVERY_ENABLED] ?: false,
+            doorbellDeliveryInstructions = p[Keys.DOORBELL_DELIVERY_INSTRUCTIONS]
+                ?: "Select who the delivery is for so they can be notified.\n\n" +
+                    "Please leave the package in a safe place near the front door.",
+            doorbellDeliveryThankYou = p[Keys.DOORBELL_DELIVERY_THANK_YOU]
+                ?: "Thank you. Your delivery notification has been sent.",
+            doorbellDeliveryPerson1Name = p[Keys.DOORBELL_DELIVERY_PERSON_1_NAME] ?: "Person 1",
+            doorbellDeliveryPerson1Webhook = p[Keys.DOORBELL_DELIVERY_PERSON_1_WEBHOOK] ?: "",
+            doorbellDeliveryPerson2Name = p[Keys.DOORBELL_DELIVERY_PERSON_2_NAME] ?: "Person 2",
+            doorbellDeliveryPerson2Webhook = p[Keys.DOORBELL_DELIVERY_PERSON_2_WEBHOOK] ?: "",
+            doorbellDeliveryPerson3Name = p[Keys.DOORBELL_DELIVERY_PERSON_3_NAME] ?: "Person 3",
+            doorbellDeliveryPerson3Webhook = p[Keys.DOORBELL_DELIVERY_PERSON_3_WEBHOOK] ?: "",
+            doorbellDeliveryOtherName = p[Keys.DOORBELL_DELIVERY_OTHER_NAME] ?: "Someone else",
+            doorbellDeliveryOtherWebhook = p[Keys.DOORBELL_DELIVERY_OTHER_WEBHOOK] ?: "",
         )
     }
 
@@ -274,6 +344,19 @@ class SettingsRepository(private val context: Context) {
             p[Keys.DOORBELL_CHIME_UNTIL_END] = next.doorbellChimeUntilCallEnds
             p[Keys.DOORBELL_CHIME_COUNT] = next.doorbellChimeCount.coerceIn(1, 10)
             p[Keys.DOORBELL_NO_ANSWER] = next.doorbellNoAnswerMessage
+            p[Keys.DOORBELL_IDLE_MESSAGE] = next.doorbellIdleMessage
+            p[Keys.DOORBELL_MESSAGE_ENABLED] = next.doorbellMessageEnabled
+            p[Keys.DOORBELL_DELIVERY_ENABLED] = next.doorbellDeliveryEnabled
+            p[Keys.DOORBELL_DELIVERY_INSTRUCTIONS] = next.doorbellDeliveryInstructions
+            p[Keys.DOORBELL_DELIVERY_THANK_YOU] = next.doorbellDeliveryThankYou
+            p[Keys.DOORBELL_DELIVERY_PERSON_1_NAME] = next.doorbellDeliveryPerson1Name
+            p[Keys.DOORBELL_DELIVERY_PERSON_1_WEBHOOK] = next.doorbellDeliveryPerson1Webhook
+            p[Keys.DOORBELL_DELIVERY_PERSON_2_NAME] = next.doorbellDeliveryPerson2Name
+            p[Keys.DOORBELL_DELIVERY_PERSON_2_WEBHOOK] = next.doorbellDeliveryPerson2Webhook
+            p[Keys.DOORBELL_DELIVERY_PERSON_3_NAME] = next.doorbellDeliveryPerson3Name
+            p[Keys.DOORBELL_DELIVERY_PERSON_3_WEBHOOK] = next.doorbellDeliveryPerson3Webhook
+            p[Keys.DOORBELL_DELIVERY_OTHER_NAME] = next.doorbellDeliveryOtherName
+            p[Keys.DOORBELL_DELIVERY_OTHER_WEBHOOK] = next.doorbellDeliveryOtherWebhook
         }
     }
 }

@@ -7,6 +7,7 @@ import au.josh.unifiphone.data.AppSettings
 import au.josh.unifiphone.data.appSettingsFromBackupJson
 import au.josh.unifiphone.data.toBackupJson
 import au.josh.unifiphone.data.DirectoryEntry
+import au.josh.unifiphone.core.DeliveryWebhookClient
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -49,6 +50,21 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app) {
     fun saveEntry(entry: DirectoryEntry) = viewModelScope.launch { directory.upsert(entry) }
     fun deleteEntry(id: String) = viewModelScope.launch { directory.delete(id) }
     fun clearHistory() = viewModelScope.launch { directory.clearHistory() }
+
+    fun sendDeliveryNotification(
+        recipient: String,
+        webhookUrl: String,
+        onResult: (Boolean) -> Unit,
+    ) = viewModelScope.launch {
+        val current = settings.value
+        val result = DeliveryWebhookClient.send(
+            webhookUrl = webhookUrl,
+            recipient = recipient,
+            doorName = current.doorbellTitle,
+            address = current.doorbellAddress,
+        )
+        onResult(result.isSuccess)
+    }
 
     /** Copy a user-picked audio file into app storage and select it as ringtone. */
     fun importRingtone(bytes: ByteArray, fileName: String) = viewModelScope.launch {

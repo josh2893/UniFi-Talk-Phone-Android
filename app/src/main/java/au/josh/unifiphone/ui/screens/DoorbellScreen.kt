@@ -26,17 +26,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Backspace
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.InfoOutline
+import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -93,6 +96,7 @@ fun DoorbellScreen(vm: PhoneViewModel, onAdminUnlocked: () -> Unit) {
     var showNoAnswer by rememberSaveable { mutableStateOf(false) }
     var localMessage by rememberSaveable { mutableStateOf<String?>(null) }
     var showPin by rememberSaveable { mutableStateOf(false) }
+    var showDelivery by rememberSaveable { mutableStateOf(false) }
 
     DisposableEffect(chime) {
         onDispose { chime.stop() }
@@ -136,6 +140,33 @@ fun DoorbellScreen(vm: PhoneViewModel, onAdminUnlocked: () -> Unit) {
         else -> DoorbellCallState.IDLE
     }
 
+    if (showDelivery) {
+        LaunchedEffect(Unit) {
+            delay(120_000)
+            showDelivery = false
+        }
+        DeliveryScreen(
+            vm = vm,
+            settings = settings,
+            registration = registration,
+            onBack = { showDelivery = false },
+            onOpenSettings = { showPin = true },
+            onComplete = { showDelivery = false },
+        )
+        if (showPin) {
+            DoorbellPinDialog(
+                expectedPin = settings.doorbellAdminPin.ifBlank { "1234" },
+                onDismiss = { showPin = false },
+                onUnlocked = {
+                    showPin = false
+                    showDelivery = false
+                    onAdminUnlocked()
+                },
+            )
+        }
+        return
+    }
+
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -176,36 +207,35 @@ fun DoorbellScreen(vm: PhoneViewModel, onAdminUnlocked: () -> Unit) {
                 )
             }
 
-            Spacer(Modifier.height(42.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(0.84f),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                Box(
+            Spacer(Modifier.height(if (settings.doorbellMessageEnabled) 34.dp else 22.dp))
+            if (settings.doorbellMessageEnabled) {
+                Row(
                     modifier = Modifier
-                        .size(46.dp)
-                        .border(1.dp, DoorbellLine, CircleShape),
-                    contentAlignment = Alignment.Center,
+                        .fillMaxWidth(0.88f)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(DoorbellSurface)
+                        .border(1.dp, DoorbellLine, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        Icons.Filled.Notifications,
+                        Icons.Filled.InfoOutline,
                         contentDescription = null,
-                        tint = DoorbellText,
-                        modifier = Modifier.size(22.dp),
+                        tint = UbntBlueDim,
+                        modifier = Modifier.size(25.dp),
+                    )
+                    Spacer(Modifier.width(14.dp))
+                    Text(
+                        text = settings.doorbellInstruction,
+                        color = DoorbellText,
+                        fontSize = 16.sp,
+                        lineHeight = 22.sp,
+                        modifier = Modifier.weight(1f),
                     )
                 }
-                Spacer(Modifier.width(16.dp))
-                Text(
-                    text = settings.doorbellInstruction,
-                    color = DoorbellText,
-                    fontSize = 17.sp,
-                    lineHeight = 24.sp,
-                    modifier = Modifier.weight(1f),
-                )
             }
 
-            Spacer(Modifier.height(34.dp))
+            Spacer(Modifier.height(26.dp))
             DoorbellButton(
                 state = visualState,
                 size = buttonSize,
@@ -237,29 +267,33 @@ fun DoorbellScreen(vm: PhoneViewModel, onAdminUnlocked: () -> Unit) {
             Spacer(Modifier.height(22.dp))
             DoorbellStateMessage(
                 state = visualState,
+                idleMessage = settings.doorbellIdleMessage,
                 noAnswerMessage = localMessage ?: settings.doorbellNoAnswerMessage,
             )
             Spacer(Modifier.weight(1f))
 
-            HorizontalDivider(color = DoorbellLine)
+            if (settings.doorbellDeliveryEnabled) {
+                DeliveryEntryCard(
+                    enabled = !call.active,
+                    onClick = { showDelivery = true },
+                )
+                Spacer(Modifier.height(6.dp))
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 10.dp),
+                    .padding(top = 2.dp),
                 horizontalArrangement = Arrangement.End,
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    IconButton(
-                        onClick = { showPin = true },
-                        enabled = !call.active,
-                    ) {
-                        Icon(
-                            Icons.Filled.MoreHoriz,
-                            contentDescription = "Open settings",
-                            tint = if (call.active) DoorbellMuted.copy(alpha = 0.4f) else DoorbellMuted,
-                        )
-                    }
-                    Text("MORE", color = DoorbellMuted, fontSize = 11.sp)
+                IconButton(
+                    onClick = { showPin = true },
+                    enabled = !call.active,
+                ) {
+                    Icon(
+                        Icons.Filled.MoreHoriz,
+                        contentDescription = "Open settings",
+                        tint = if (call.active) DoorbellMuted.copy(alpha = 0.4f) else DoorbellMuted,
+                    )
                 }
             }
         }
@@ -408,9 +442,13 @@ private fun DoorbellButton(
 }
 
 @Composable
-private fun DoorbellStateMessage(state: DoorbellCallState, noAnswerMessage: String) {
+private fun DoorbellStateMessage(
+    state: DoorbellCallState,
+    idleMessage: String,
+    noAnswerMessage: String,
+) {
     val (message, color) = when (state) {
-        DoorbellCallState.IDLE -> "We are ready when you are." to DoorbellMuted
+        DoorbellCallState.IDLE -> idleMessage to DoorbellMuted
         DoorbellCallState.RINGING -> "Calling now. Please wait..." to UbntBlueDim
         DoorbellCallState.CONNECTED -> "Connected. You may speak now." to SuccessGreen
         DoorbellCallState.NO_ANSWER -> noAnswerMessage to DangerRed
@@ -423,6 +461,45 @@ private fun DoorbellStateMessage(state: DoorbellCallState, noAnswerMessage: Stri
         textAlign = TextAlign.Center,
         modifier = Modifier.fillMaxWidth(0.84f),
     )
+}
+
+@Composable
+private fun DeliveryEntryCard(enabled: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(DoorbellSurface)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.Inventory2,
+            contentDescription = null,
+            tint = if (enabled) UbntBlueDim else DoorbellMuted.copy(alpha = 0.45f),
+            modifier = Modifier.size(28.dp),
+        )
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                "DELIVERY",
+                color = if (enabled) DoorbellText else DoorbellMuted.copy(alpha = 0.45f),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "Tap for delivery instructions",
+                color = DoorbellMuted,
+                fontSize = 13.sp,
+            )
+        }
+        Icon(
+            Icons.Filled.ChevronRight,
+            contentDescription = null,
+            tint = DoorbellMuted,
+        )
+    }
 }
 
 @Composable
