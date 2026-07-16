@@ -54,7 +54,7 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app) {
     fun sendDeliveryNotification(
         recipient: String,
         webhookUrl: String,
-        onResult: (Boolean) -> Unit,
+        onResult: (Boolean, String?) -> Unit,
     ) = viewModelScope.launch {
         val current = settings.value
         val result = DeliveryWebhookClient.send(
@@ -65,7 +65,7 @@ class PhoneViewModel(app: Application) : AndroidViewModel(app) {
             apiKeyHeader = current.doorbellDeliveryApiKeyHeader,
             apiKey = current.doorbellDeliveryApiKey,
         )
-        onResult(result.isSuccess)
+        onResult(result.isSuccess, result.exceptionOrNull()?.message)
     }
 
     /** Copy a user-picked audio file into app storage and select it as ringtone. */

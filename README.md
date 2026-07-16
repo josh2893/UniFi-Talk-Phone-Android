@@ -33,8 +33,11 @@ app routes audio to the built-in speaker at full call volume, then restores the 
 volume when the call ends. The default settings PIN is `1234`; change it before deployment.
 
 The optional delivery screen supports three named recipients plus a configurable
-"Someone else" destination. Each destination sends an HTTP POST webhook containing
-`event`, `recipient`, `door`, `address`, and `sentAt` JSON fields. Successful delivery
+"Someone else" destination. Generic destinations receive an HTTP POST containing
+`event`, `recipient`, `door`, `address`, and `sentAt` JSON fields. UniFi Protect Alarm
+Manager trigger URLs are recognized and sent as an empty authenticated POST, as required
+by the Protect API. Private-address Protect HTTPS endpoints support the console's local
+certificate. Successful delivery
 notifications show an animated confirmation, play the bundled notification sound, and
 return to the doorbell automatically. The screen also closes after two minutes of inactivity.
 Webhooks can include a shared API credential using a configurable header name, such as

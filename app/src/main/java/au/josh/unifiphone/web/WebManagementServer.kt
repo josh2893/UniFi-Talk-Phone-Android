@@ -220,7 +220,7 @@ const schema=[
  ]},
  {id:'delivery',title:'Delivery',lead:'Delivery instructions, recipients, webhooks, and authentication.',groups:[
   {title:'Experience',fields:[['doorbellDeliveryEnabled','Show delivery option','toggle'],['doorbellDeliveryInstructions','Delivery instructions','textarea'],['doorbellDeliveryThankYou','Thank-you message','textarea']]},
-  {title:'Webhook authentication',fields:[['doorbellDeliveryApiKeyHeader','API key header'],['doorbellDeliveryApiKey','API key or bearer value','password']]},
+  {title:'Webhook authentication',fields:[['doorbellDeliveryApiKeyHeader','API key header (Protect: X-API-KEY)'],['doorbellDeliveryApiKey','API key (no Bearer for Protect)','password']]},
   {title:'Recipients',fields:[['doorbellDeliveryPerson1Name','Person 1 name'],['doorbellDeliveryPerson1Webhook','Person 1 webhook'],['doorbellDeliveryPerson2Name','Person 2 name'],['doorbellDeliveryPerson2Webhook','Person 2 webhook'],['doorbellDeliveryPerson3Name','Person 3 name'],['doorbellDeliveryPerson3Webhook','Person 3 webhook'],['doorbellDeliveryOtherName','Other name'],['doorbellDeliveryOtherWebhook','Other webhook']]}
  ]},
  {id:'system',title:'System',lead:'Local administration and configuration transfer.',groups:[

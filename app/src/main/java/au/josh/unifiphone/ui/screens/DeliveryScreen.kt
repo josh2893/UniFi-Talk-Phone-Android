@@ -29,7 +29,6 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material.icons.filled.MarkEmailRead
-import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material3.Button
@@ -87,7 +86,6 @@ fun DeliveryScreen(
     vm: PhoneViewModel,
     settings: AppSettings,
     onBack: () -> Unit,
-    onOpenSettings: () -> Unit,
     onComplete: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -131,6 +129,7 @@ fun DeliveryScreen(
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var state by rememberSaveable { mutableStateOf(DeliveryUiState.SELECTING) }
     var webhookResult by remember { mutableStateOf<Boolean?>(null) }
+    var webhookError by remember { mutableStateOf<String?>(null) }
     var sendStartedAt by remember { mutableLongStateOf(0L) }
     val selected = recipients.firstOrNull { it.id == selectedId }
 
@@ -276,8 +275,10 @@ fun DeliveryScreen(
                             selected?.let { target ->
                                 state = DeliveryUiState.SENDING
                                 webhookResult = null
+                                webhookError = null
                                 sendStartedAt = System.currentTimeMillis()
-                                vm.sendDeliveryNotification(target.name, target.webhook) { success ->
+                                vm.sendDeliveryNotification(target.name, target.webhook) { success, error ->
+                                    webhookError = error
                                     webhookResult = success
                                 }
                             }
@@ -296,19 +297,16 @@ fun DeliveryScreen(
                 DeliveryProgressContent(
                     state = state,
                     thankYouMessage = settings.doorbellDeliveryThankYou,
+                    errorMessage = webhookError,
                     onRetry = {
                         webhookResult = null
+                        webhookError = null
                         state = DeliveryUiState.SELECTING
                     },
                 )
             }
         }
 
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            IconButton(onClick = onOpenSettings) {
-                Icon(Icons.Filled.MoreHoriz, contentDescription = "Open settings", tint = DeliveryMuted)
-            }
-        }
     }
 }
 
@@ -395,6 +393,7 @@ private fun OtherRecipientButton(
 private fun DeliveryProgressContent(
     state: DeliveryUiState,
     thankYouMessage: String,
+    errorMessage: String?,
     onRetry: () -> Unit,
 ) {
     Column(
@@ -433,10 +432,13 @@ private fun DeliveryProgressContent(
                 Text("Notification failed", color = DangerRed, fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "The notification could not be delivered. Please try again or ring the doorbell.",
+                    errorMessage?.takeIf { it.isNotBlank() }
+                        ?: "The notification could not be delivered. Please try again or ring the doorbell.",
                     color = DeliveryMuted,
                     textAlign = TextAlign.Center,
                     lineHeight = 22.sp,
+                    maxLines = 5,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth(0.84f),
                 )
                 Spacer(Modifier.height(24.dp))

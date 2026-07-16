@@ -710,7 +710,9 @@ private fun DoorbellSettingsContent(vm: PhoneViewModel) {
                     value = apiKeyHeader,
                     onValueChange = { apiKeyHeader = it },
                     label = { Text("API key header") },
-                    supportingText = { Text("For example: X-API-Key or Authorization") },
+                    supportingText = {
+                        Text("UniFi Protect uses X-API-KEY with the raw key, not Bearer")
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )

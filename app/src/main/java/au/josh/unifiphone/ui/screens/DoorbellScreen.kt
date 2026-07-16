@@ -173,7 +173,6 @@ fun DoorbellScreen(vm: PhoneViewModel, onAdminUnlocked: () -> Unit) {
             vm = vm,
             settings = settings,
             onBack = { showDelivery = false },
-            onOpenSettings = { showPin = true },
             onComplete = { showDelivery = false },
         )
         if (showPin) {
@@ -302,33 +301,30 @@ fun DoorbellScreen(vm: PhoneViewModel, onAdminUnlocked: () -> Unit) {
             }
             Spacer(Modifier.weight(1f))
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (settings.doorbellDeliveryEnabled) {
-                    Box(Modifier.weight(1f)) {
-                        DeliveryEntryCard(
-                            enabled = !call.active,
-                            onClick = { showDelivery = true },
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                } else {
-                    Spacer(Modifier.weight(1f))
-                }
-                IconButton(
-                    onClick = { showPin = true },
+            if (settings.doorbellDeliveryEnabled) {
+                DeliveryEntryCard(
                     enabled = !call.active,
-                ) {
-                    Icon(
-                        Icons.Filled.MoreHoriz,
-                        contentDescription = "Open settings",
-                        tint = if (call.active) DoorbellMuted.copy(alpha = 0.4f) else DoorbellMuted,
-                    )
-                }
+                    onClick = { showDelivery = true },
+                )
             }
+        }
+
+        IconButton(
+            onClick = { showPin = true },
+            enabled = !call.active,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(top = 24.dp)
+                .graphicsLayer {
+                    translationX = pixelShift.first
+                    translationY = pixelShift.second
+                },
+        ) {
+            Icon(
+                Icons.Filled.MoreHoriz,
+                contentDescription = "Open settings",
+                tint = if (call.active) DoorbellMuted.copy(alpha = 0.4f) else DoorbellMuted,
+            )
         }
     }
 
