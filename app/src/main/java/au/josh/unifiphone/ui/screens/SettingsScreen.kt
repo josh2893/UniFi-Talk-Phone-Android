@@ -277,6 +277,16 @@ fun SettingsScreen(vm: PhoneViewModel) {
                     vm.updateSettings { s -> s.copy(videoStretchFixPercent = next) }
                 },
             )
+            StepperRow(
+                label = "Receive stretch fix",
+                value = "${settings.videoReceiveStretchFixPercent}%",
+                onTap = {
+                    val opts = listOf(100, 95, 90, 85, 80, 75, 67, 60, 56, 50)
+                    val idx = opts.indexOf(settings.videoReceiveStretchFixPercent).let { if (it < 0) 0 else it }
+                    val next = opts[(idx + 1) % opts.size]
+                    vm.updateSettings { s -> s.copy(videoReceiveStretchFixPercent = next) }
+                },
+            )
             Text(
                 "Changes apply on the NEXT call — hang up and redial to see them. " +
                     "Tune rotation first (portrait upright), then resolution/bitrate for quality.",

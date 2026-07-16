@@ -93,6 +93,9 @@ class SipEngine(
     private var videoTx: VideoSender? = null
     private var pendingOffer: SdpSession? = null
     private var pendingRemoteSurface: Surface? = null
+    private var pendingLocalPreviewSurface: Surface? = null
+    private var pendingLocalPreviewWidth = 0
+    private var pendingLocalPreviewHeight = 0
 
     private var ringPlayer: MediaPlayer? = null
     private var ringbackTone: ToneGenerator? = null
@@ -237,7 +240,7 @@ class SipEngine(
             )
             videoRx = VideoReceiver(videoRtp!!)
             videoTx = VideoSender(context, videoRtp!!, buildVideoTuning())
-            pendingRemoteSurface?.let { videoRx?.attachSurface(it) }
+            attachPendingVideoSurfaces()
         }
         val sdp = Sdp.build(
             localIp = client.localIp,
@@ -340,7 +343,7 @@ class SipEngine(
         for (c in digits) audio?.sendDtmf(c)
     }
 
-    /** CallScreen hands us the SurfaceView surface for remote video. */
+    /** CallScreen hands us the render surface for remote video. */
     /** Live one-line media stats for the on-screen debug overlay. */
     fun videoDebugStats(): String {
         val vr = videoRtp
@@ -353,9 +356,23 @@ class SipEngine(
         }
     }
 
-    fun attachRemoteVideoSurface(surface: Surface) {
+    fun attachRemoteVideoSurface(surface: Surface?) {
         pendingRemoteSurface = surface
         videoRx?.attachSurface(surface)
+    }
+
+    fun attachLocalPreviewSurface(surface: Surface?, width: Int, height: Int) {
+        pendingLocalPreviewSurface = surface
+        pendingLocalPreviewWidth = width
+        pendingLocalPreviewHeight = height
+        videoTx?.attachPreviewSurface(surface, width, height)
+    }
+
+    private fun attachPendingVideoSurfaces() {
+        pendingRemoteSurface?.let { videoRx?.attachSurface(it) }
+        pendingLocalPreviewSurface?.let {
+            videoTx?.attachPreviewSurface(it, pendingLocalPreviewWidth, pendingLocalPreviewHeight)
+        }
     }
 
     // ---- SIP listener ---------------------------------------------------
@@ -561,7 +578,7 @@ class SipEngine(
             )
             videoRx = VideoReceiver(videoRtp!!)
             videoTx = VideoSender(context, videoRtp!!, buildVideoTuning())
-            pendingRemoteSurface?.let { videoRx?.attachSurface(it) }
+            attachPendingVideoSurfaces()
         }
     }
 
@@ -583,7 +600,7 @@ class SipEngine(
             )
             videoRx = VideoReceiver(videoRtp!!)
             videoTx = VideoSender(context, videoRtp!!, buildVideoTuning())
-            pendingRemoteSurface?.let { videoRx?.attachSurface(it) }
+            attachPendingVideoSurfaces()
         }
     }
 

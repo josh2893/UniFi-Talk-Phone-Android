@@ -35,8 +35,23 @@ class VideoReceiver(private val rtp: RtpSession) {
         onNeedKeyframe = { seenKeyframe = false; requestKeyframe() },
     )
 
-    fun attachSurface(s: Surface) {
+    fun attachSurface(s: Surface?) {
+        if (s == null) {
+            surface = null
+            runCatching { codec?.stop(); codec?.release() }
+            codec = null
+            queue.clear()
+            seenKeyframe = false
+            EngineLog.d("VIDEO-RX: surface detached")
+            return
+        }
+        val surfaceChanged = surface != s
         surface = s
+        if (running.get() && codec != null && surfaceChanged) {
+            resetCodec()
+            EngineLog.d("VIDEO-RX: surface changed, codec reset + PLI")
+            return
+        }
         // The surface often arrives AFTER start() — in a parallel-ring video call
         // the CallScreen video view only composes once videoActive flips true,
         // which is after the winner set media up. So start the codec here if we're
@@ -137,6 +152,11 @@ class VideoReceiver(private val rtp: RtpSession) {
     private fun drainOutput(c: MediaCodec, info: MediaCodec.BufferInfo) {
         while (true) {
             val outIdx = try { c.dequeueOutputBuffer(info, 0) } catch (_: Exception) { return }
+            if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                val fmt = runCatching { c.outputFormat }.getOrNull()
+                EngineLog.d("VIDEO-RX: decoder output format $fmt")
+                continue
+            }
             if (outIdx < 0) return
             framesDecoded++
             if (framesDecoded == 1L) EngineLog.d("VIDEO-RX: first frame DECODED + rendered")

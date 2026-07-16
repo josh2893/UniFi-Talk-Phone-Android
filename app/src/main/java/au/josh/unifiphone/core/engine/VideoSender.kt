@@ -51,6 +51,8 @@ class VideoSender(
     private var cameraThread: HandlerThread? = null
     private var previewTexture: SurfaceTexture? = null
     private var previewSurface: Surface? = null
+    private var previewWidth = 0
+    private var previewHeight = 0
     private var glBridge: GlRotationBridge? = null
     private var configData: ByteArray? = null
     private var timestamp = 0L // 90 kHz
@@ -59,6 +61,13 @@ class VideoSender(
         runCatching {
             codec?.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0) })
         }
+    }
+
+    fun attachPreviewSurface(surface: Surface?, width: Int, height: Int) {
+        previewSurface = surface
+        previewWidth = width
+        previewHeight = height
+        glBridge?.setPreviewSurface(surface, width, height)
     }
 
     @SuppressLint("MissingPermission")
@@ -145,6 +154,7 @@ class VideoSender(
             glBridge = bridge
 
             bridge.start { camTarget ->
+                previewSurface?.let { bridge.setPreviewSurface(it, previewWidth, previewHeight) }
                 cm.openCamera(camId, object : CameraDevice.StateCallback() {
                     override fun onOpened(dev: CameraDevice) {
                         EngineLog.d("VIDEO-TX: camera opened")
@@ -270,9 +280,9 @@ class VideoSender(
         runCatching { session?.close() }
         runCatching { camera?.close() }
         runCatching { codec?.stop(); codec?.release() }
+        runCatching { glBridge?.setPreviewSurface(null, 0, 0) }
         runCatching { glBridge?.release() }
         glBridge = null
-        runCatching { previewSurface?.release() }
         runCatching { previewTexture?.release() }
         runCatching { cameraThread?.quitSafely() }
         session = null; camera = null; codec = null; cameraThread = null

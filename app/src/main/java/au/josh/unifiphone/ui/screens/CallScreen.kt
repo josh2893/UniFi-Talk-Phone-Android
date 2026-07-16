@@ -1,7 +1,9 @@
 package au.josh.unifiphone.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Column
@@ -9,7 +11,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
@@ -34,11 +38,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import android.view.SurfaceHolder
-import android.view.SurfaceView
+import android.graphics.Matrix
+import android.graphics.SurfaceTexture
+import android.view.Surface
+import android.view.TextureView
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -51,10 +59,14 @@ import au.josh.unifiphone.ui.RoundActionButton
 import au.josh.unifiphone.ui.theme.DangerRed
 import au.josh.unifiphone.ui.theme.SuccessGreen
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 @Composable
 fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
     var showDtmf by remember { mutableStateOf(false) }
+    var showSelfView by remember { mutableStateOf(true) }
+    var selfOffsetX by remember { mutableStateOf(0f) }
+    var selfOffsetY by remember { mutableStateOf(0f) }
     var elapsed by remember { mutableLongStateOf(0L) }
 
     LaunchedEffect(call.connected, call.startedAtMs) {
@@ -132,18 +144,98 @@ fun CallScreen(vm: PhoneViewModel, call: CallUiState) {
             ) {
                 AndroidView(
                     factory = { ctx ->
-                        SurfaceView(ctx).apply {
-                            holder.addCallback(object : SurfaceHolder.Callback {
-                                override fun surfaceCreated(h: SurfaceHolder) {
-                                    vm.engine.attachRemoteVideoSurface(h.surface)
+                        val textureView = TextureView(ctx)
+                        textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                                private var outputSurface: Surface? = null
+                                override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                                    outputSurface = Surface(st).also { vm.engine.attachRemoteVideoSurface(it) }
+                                    applyReceiveStretchFix(textureView, settings.videoReceiveStretchFixPercent)
                                 }
-                                override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, ht: Int) {}
-                                override fun surfaceDestroyed(h: SurfaceHolder) {}
-                            })
+                                override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
+                                    applyReceiveStretchFix(textureView, settings.videoReceiveStretchFixPercent)
+                                }
+                                override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                                    vm.engine.attachRemoteVideoSurface(null)
+                                    outputSurface?.release()
+                                    outputSurface = null
+                                    return true
+                                }
+                                override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
                         }
+                        textureView
                     },
+                    update = { applyReceiveStretchFix(it, settings.videoReceiveStretchFixPercent) },
                     modifier = Modifier.fillMaxSize(),
                 )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(12.dp),
+                ) {
+                    RoundActionButton(
+                        background = if (showSelfView) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.surfaceVariant,
+                        onClick = { showSelfView = !showSelfView },
+                        size = 44,
+                    ) {
+                        Icon(
+                            Icons.Filled.Videocam,
+                            "Self view",
+                            tint = if (showSelfView) Color.White else MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+                if (showSelfView) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(12.dp)
+                            .offset { IntOffset(selfOffsetX.roundToInt(), selfOffsetY.roundToInt()) }
+                            .width(124.dp)
+                            .aspectRatio(9f / 16f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Black)
+                            .pointerInput(Unit) {
+                                detectDragGestures { _, drag ->
+                                    selfOffsetX += drag.x
+                                    selfOffsetY += drag.y
+                                }
+                            },
+                    ) {
+                        AndroidView(
+                            factory = { ctx ->
+                                val textureView = TextureView(ctx)
+                                textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                                    private var previewSurface: Surface? = null
+                                    override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                                        previewSurface = Surface(st).also {
+                                            vm.engine.attachLocalPreviewSurface(it, w, h)
+                                        }
+                                    }
+                                    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
+                                        previewSurface?.let {
+                                            vm.engine.attachLocalPreviewSurface(it, w, h)
+                                        }
+                                    }
+                                    override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                                        vm.engine.attachLocalPreviewSurface(null, 0, 0)
+                                        previewSurface?.release()
+                                        previewSurface = null
+                                        return true
+                                    }
+                                    override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+                                }
+                                textureView
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                } else {
+                    DisposableEffect(Unit) {
+                        vm.engine.attachLocalPreviewSurface(null, 0, 0)
+                        onDispose {}
+                    }
+                }
                 if (showDtmf) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
                         Box(Modifier.background(Color.Black.copy(alpha = 0.6f))) {
@@ -232,4 +324,11 @@ private fun ToggleCallButton(
     else MaterialTheme.colorScheme.surfaceVariant
     val tint = if (active) Color.White else MaterialTheme.colorScheme.onSurface
     RoundActionButton(background = bg, onClick = onClick, size = 60) { icon(tint) }
+}
+
+private fun applyReceiveStretchFix(view: TextureView, percent: Int) {
+    val scaleX = percent.coerceIn(40, 140) / 100f
+    val matrix = Matrix()
+    matrix.setScale(scaleX, 1f, view.width / 2f, view.height / 2f)
+    view.setTransform(matrix)
 }

@@ -46,7 +46,10 @@ class GlRotationBridge(
 ) {
     private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
     private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
-    private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
+    private var encoderEglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
+    private var previewEglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
+    private var previewWidth = 0
+    private var previewHeight = 0
 
     private var program = 0
     private var texId = 0
@@ -97,13 +100,57 @@ class GlRotationBridge(
         }
     }
 
+    fun setPreviewSurface(surface: Surface?, width: Int, height: Int) {
+        handler?.post {
+            if (previewEglSurface != EGL14.EGL_NO_SURFACE) {
+                if (encoderEglSurface != EGL14.EGL_NO_SURFACE) {
+                    EGL14.eglMakeCurrent(eglDisplay, encoderEglSurface, encoderEglSurface, eglContext)
+                }
+                runCatching { EGL14.eglDestroySurface(eglDisplay, previewEglSurface) }
+                previewEglSurface = EGL14.EGL_NO_SURFACE
+            }
+            previewWidth = width
+            previewHeight = height
+            if (surface != null && width > 0 && height > 0 && eglDisplay != EGL14.EGL_NO_DISPLAY) {
+                previewEglSurface = EGL14.eglCreateWindowSurface(
+                    eglDisplay, chooseConfig(), surface, intArrayOf(EGL14.EGL_NONE), 0
+                )
+                EngineLog.d("VIDEO-TX: self-view surface ${width}x$height attached")
+            } else {
+                EngineLog.d("VIDEO-TX: self-view surface detached")
+            }
+        }
+    }
+
     private fun drawFrame() {
         val st = cameraTexture ?: return
         try {
             st.updateTexImage()
             st.getTransformMatrix(stMatrix)
 
+            EGL14.eglMakeCurrent(eglDisplay, encoderEglSurface, encoderEglSurface, eglContext)
             GLES20.glViewport(0, 0, outWidth, outHeight)
+            drawCurrentTexture()
+            android.opengl.EGLExt.eglPresentationTimeANDROID(
+                eglDisplay, encoderEglSurface, st.timestamp
+            )
+            EGL14.eglSwapBuffers(eglDisplay, encoderEglSurface)
+
+            if (previewEglSurface != EGL14.EGL_NO_SURFACE && previewWidth > 0 && previewHeight > 0) {
+                EGL14.eglMakeCurrent(eglDisplay, previewEglSurface, previewEglSurface, eglContext)
+                GLES20.glViewport(0, 0, previewWidth, previewHeight)
+                drawCurrentTexture()
+                android.opengl.EGLExt.eglPresentationTimeANDROID(
+                    eglDisplay, previewEglSurface, st.timestamp
+                )
+                EGL14.eglSwapBuffers(eglDisplay, previewEglSurface)
+            }
+        } catch (e: Exception) {
+            EngineLog.d("VIDEO-TX: GL draw error: ${e.message}")
+        }
+    }
+
+    private fun drawCurrentTexture() {
             GLES20.glClearColor(0f, 0f, 0f, 1f)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
 
@@ -154,22 +201,26 @@ class GlRotationBridge(
             GLES20.glEnableVertexAttribArray(aTex)
 
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-
-            // Timestamp the encoder frame from the camera's own clock.
-            android.opengl.EGLExt.eglPresentationTimeANDROID(
-                eglDisplay, eglSurface, st.timestamp
-            )
-            EGL14.eglSwapBuffers(eglDisplay, eglSurface)
-        } catch (e: Exception) {
-            EngineLog.d("VIDEO-TX: GL draw error: ${e.message}")
-        }
     }
 
     private fun initEgl() {
         eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
         val version = IntArray(2)
         EGL14.eglInitialize(eglDisplay, version, 0, version, 1)
+        val config = chooseConfig()
 
+        val ctxAttribs = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE)
+        eglContext = EGL14.eglCreateContext(
+            eglDisplay, config, EGL14.EGL_NO_CONTEXT, ctxAttribs, 0
+        )
+        val surfAttribs = intArrayOf(EGL14.EGL_NONE)
+        encoderEglSurface = EGL14.eglCreateWindowSurface(
+            eglDisplay, config, encoderSurface, surfAttribs, 0
+        )
+        EGL14.eglMakeCurrent(eglDisplay, encoderEglSurface, encoderEglSurface, eglContext)
+    }
+
+    private fun chooseConfig(): EGLConfig {
         val attribs = intArrayOf(
             EGL14.EGL_RED_SIZE, 8,
             EGL14.EGL_GREEN_SIZE, 8,
@@ -182,16 +233,7 @@ class GlRotationBridge(
         val configs = arrayOfNulls<EGLConfig>(1)
         val numConfigs = IntArray(1)
         EGL14.eglChooseConfig(eglDisplay, attribs, 0, configs, 0, 1, numConfigs, 0)
-
-        val ctxAttribs = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE)
-        eglContext = EGL14.eglCreateContext(
-            eglDisplay, configs[0], EGL14.EGL_NO_CONTEXT, ctxAttribs, 0
-        )
-        val surfAttribs = intArrayOf(EGL14.EGL_NONE)
-        eglSurface = EGL14.eglCreateWindowSurface(
-            eglDisplay, configs[0], encoderSurface, surfAttribs, 0
-        )
-        EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+        return configs[0] ?: throw IllegalStateException("No EGL config")
     }
 
     private fun initGl() {
@@ -274,13 +316,15 @@ class GlRotationBridge(
                 EGL14.eglMakeCurrent(
                     eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT
                 )
-                runCatching { EGL14.eglDestroySurface(eglDisplay, eglSurface) }
+                runCatching { EGL14.eglDestroySurface(eglDisplay, previewEglSurface) }
+                runCatching { EGL14.eglDestroySurface(eglDisplay, encoderEglSurface) }
                 runCatching { EGL14.eglDestroyContext(eglDisplay, eglContext) }
                 runCatching { EGL14.eglTerminate(eglDisplay) }
             }
             eglDisplay = EGL14.EGL_NO_DISPLAY
             eglContext = EGL14.EGL_NO_CONTEXT
-            eglSurface = EGL14.EGL_NO_SURFACE
+            encoderEglSurface = EGL14.EGL_NO_SURFACE
+            previewEglSurface = EGL14.EGL_NO_SURFACE
             cameraSurface = null
             cameraTexture = null
             thread?.quitSafely()

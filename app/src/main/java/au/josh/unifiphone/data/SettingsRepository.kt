@@ -24,6 +24,8 @@ fun AppSettings.toBackupJson(): String {
     o.put("videoUseFrontCamera", videoUseFrontCamera); o.put("videoResolution", videoResolution)
     o.put("videoBitrateKbps", videoBitrateKbps); o.put("videoScaleMode", videoScaleMode); o.put("videoTargetAspect", videoTargetAspect)
     o.put("videoStretchFixPercent", videoStretchFixPercent)
+    o.put("videoReceiveStretchFixPercent", videoReceiveStretchFixPercent)
+    o.put("showDebugOverlay", showDebugOverlay)
     return o.toString(2)
 }
 
@@ -55,6 +57,8 @@ fun appSettingsFromBackupJson(json: String, base: AppSettings = AppSettings()): 
         videoScaleMode = str("videoScaleMode", base.videoScaleMode),
         videoTargetAspect = str("videoTargetAspect", base.videoTargetAspect),
         videoStretchFixPercent = int("videoStretchFixPercent", base.videoStretchFixPercent),
+        videoReceiveStretchFixPercent = int("videoReceiveStretchFixPercent", base.videoReceiveStretchFixPercent),
+        showDebugOverlay = bool("showDebugOverlay", base.showDebugOverlay),
     )
 }
 
@@ -116,6 +120,8 @@ data class AppSettings(
     val videoTargetAspect: String = "9:16",
     // Pre-squeeze outgoing pixels horizontally before encoding. 100 = neutral.
     val videoStretchFixPercent: Int = 100,
+    // Squeeze/expand received video on screen. 100 = neutral.
+    val videoReceiveStretchFixPercent: Int = 100,
     // Show a live stats overlay (packet/frame counters) during calls.
     val showDebugOverlay: Boolean = false,
 )
@@ -144,6 +150,7 @@ class SettingsRepository(private val context: Context) {
         val VIDEO_SCALE = stringPreferencesKey("video_scale_mode")
         val VIDEO_ASPECT = stringPreferencesKey("video_target_aspect")
         val VIDEO_STRETCH_FIX = androidx.datastore.preferences.core.intPreferencesKey("video_stretch_fix_percent")
+        val VIDEO_RECEIVE_STRETCH_FIX = androidx.datastore.preferences.core.intPreferencesKey("video_receive_stretch_fix_percent")
         val DEBUG_OVERLAY = booleanPreferencesKey("debug_overlay")
     }
 
@@ -172,6 +179,7 @@ class SettingsRepository(private val context: Context) {
             videoScaleMode = p[Keys.VIDEO_SCALE] ?: "fill",
             videoTargetAspect = p[Keys.VIDEO_ASPECT] ?: "9:16",
             videoStretchFixPercent = p[Keys.VIDEO_STRETCH_FIX] ?: 100,
+            videoReceiveStretchFixPercent = p[Keys.VIDEO_RECEIVE_STRETCH_FIX] ?: 100,
             showDebugOverlay = p[Keys.DEBUG_OVERLAY] ?: false,
         )
     }
@@ -202,6 +210,7 @@ class SettingsRepository(private val context: Context) {
             p[Keys.VIDEO_SCALE] = next.videoScaleMode
             p[Keys.VIDEO_ASPECT] = next.videoTargetAspect
             p[Keys.VIDEO_STRETCH_FIX] = next.videoStretchFixPercent.coerceIn(40, 140)
+            p[Keys.VIDEO_RECEIVE_STRETCH_FIX] = next.videoReceiveStretchFixPercent.coerceIn(40, 140)
             p[Keys.DEBUG_OVERLAY] = next.showDebugOverlay
         }
     }
